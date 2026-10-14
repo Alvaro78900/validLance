@@ -1,0 +1,537 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="description" content="Panel de control de ValidLance: valida, compite, lanza y genera tu idea de negocio.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0406'/%3E%3Cpath d='M12 16h13l7 22 7-22h13L38 50H26z' fill='%23c41e3a'/%3E%3C/svg%3E">
+<title>ValidLance</title>
+<meta name="theme-color" content="#0b0406">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ValidLance">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-home" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.6"/><rect x="14" y="3" width="7" height="5" rx="1.6"/><rect x="14" y="12" width="7" height="9" rx="1.6"/><rect x="3" y="16" width="7" height="5" rx="1.6"/></symbol>
+<symbol id="i-valida" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
+<symbol id="i-compite" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></symbol>
+<symbol id="i-lanza" viewBox="0 0 24 24"><path d="M21 3L10 14"/><path d="M21 3l-6.5 18-4.2-7.3L3 9.5 21 3z"/></symbol>
+<symbol id="i-genera" viewBox="0 0 24 24"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/><path d="M19 16l.7 1.8 1.8.7-1.8.7L19 21l-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+<symbol id="i-pen" viewBox="0 0 24 24"><path d="M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17v3z"/><path d="M14 7l3 3"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-6.5-5.6-6.5-11a6.5 6.5 0 0 1 13 0c0 5.4-6.5 11-6.5 11z"/><circle cx="12" cy="10" r="2.3"/></symbol>
+<symbol id="i-ext" viewBox="0 0 24 24"><path d="M7 17L17 7"/><path d="M8 7h9v9"/></symbol>
+<symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 13.5A8.5 8.5 0 1 1 10.5 3a7 7 0 0 0 10.5 10.5z"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+<symbol id="i-left" viewBox="0 0 24 24"><path d="M19 12H5M11 6l-6 6 6 6"/></symbol>
+<symbol id="i-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 0 1 2-2h9"/></symbol>
+<symbol id="i-down" viewBox="0 0 24 24"><path d="M12 4v11M7 11l5 5 5-5M5 20h14"/></symbol>
+<symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
+<symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
+<symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+<symbol id="i-euro" viewBox="0 0 24 24"><path d="M18 7a6 6 0 1 0 0 10M4 10h9M4 14h9"/></symbol>
+<symbol id="i-trend" viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v.4"/></symbol>
+<symbol id="i-tablet" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M11 18h2"/></symbol>
+<symbol id="i-desktop" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+<symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2.5" width="10" height="19" rx="2.2"/><path d="M11 18h2"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></symbol>
+<symbol id="i-board" viewBox="0 0 24 24"><rect x="3" y="4" width="5" height="16" rx="1.2"/><rect x="10" y="4" width="5" height="10" rx="1.2"/><rect x="17" y="4" width="4" height="13" rx="1.2"/></symbol>
+<symbol id="i-line" viewBox="0 0 24 24"><path d="M4 6h9M8 12h12M6 18h8"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M9 6h11M9 12h11M9 18h11M3.5 6l1.2 1.2L6.5 5M3.5 12l1.2 1.2L6.5 11M3.5 18l1.2 1.2L6.5 17"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-8 8-8s8 3.6 8 8"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-mail" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/></symbol>
+<symbol id="i-form" viewBox="0 0 24 24"><rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/></symbol>
+<symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 7.6v.4"/></symbol>
+<symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z"/></symbol>
+<symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9 18h6M10 21h4M12 3a6 6 0 0 0-3.5 10.9c.7.6 1 1.3 1 2.1h5c0-.8.3-1.5 1-2.1A6 6 0 0 0 12 3z"/></symbol>
+<symbol id="i-flame" viewBox="0 0 24 24"><path d="M12 3c1 3.5 5 5.5 5 10a5 5 0 0 1-10 0c0-2 1-3.2 2-4.2.4 1.2 1 1.8 1.8 2C10.5 8 11 5.5 12 3z"/></symbol>
+<symbol id="i-m-saas" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.4"/><path d="M3 9h18"/><path d="M9.5 12.8L7.4 15l2.1 2.2M14.5 12.8l2.1 2.2-2.1 2.2"/></symbol>
+<symbol id="i-m-trade" viewBox="0 0 24 24"><path d="M3.5 3.5v17h17"/><path d="M7.5 15.5l3.6-4.4 3 2.6 5-6.2"/><path d="M15.5 7.5h3.7v3.7"/></symbol>
+<symbol id="i-m-serv" viewBox="0 0 24 24"><rect x="3" y="7.5" width="18" height="12.5" rx="2.4"/><path d="M8.8 7.5V6a2 2 0 0 1 2-2h2.4a2 2 0 0 1 2 2v1.5M3 13h18M10.5 13v1.6h3V13"/></symbol>
+<symbol id="i-m-shop" viewBox="0 0 24 24"><path d="M5.2 8h13.6l-1 12H6.2l-1-12z"/><path d="M9 8V6.6a3 3 0 0 1 6 0V8"/></symbol>
+<symbol id="i-m-info" viewBox="0 0 24 24"><path d="M12 6.2C9.9 4.7 7 4.2 4 4.2v13.6c3 0 5.9.5 8 2 2.1-1.5 5-2 8-2V4.2c-3 0-5.9.5-8 2z"/><path d="M12 6.2v13.6"/></symbol>
+<symbol id="i-m-otro" viewBox="0 0 24 24"><path d="M12 3l9 4.8-9 4.8-9-4.8L12 3z"/><path d="M3 12.2l9 4.8 9-4.8M3 16.6L12 21.4l9-4.8"/></symbol>
+<symbol id="i-swap" viewBox="0 0 24 24"><path d="M4 8h14M14.5 4.5L18 8l-3.5 3.5"/><path d="M20 16H6M9.5 12.5L6 16l3.5 3.5"/></symbol>
+<symbol id="i-vmark" viewBox="0 0 24 24"><path d="M2.6 4.5h4.5l4.9 9.6 4.9-9.6h4.5L14 20h-4z" fill="currentColor" stroke="none"/></symbol>
+<!-- Astro · figura humanoide cósmica: traje oscuro con patrón de estrellas, bordados celestes en hilo dorado y corbata granate. La «cabeza» (constelaciones y polvo cósmico) la dibuja astra.js sobre este símbolo. -->
+<symbol id="ax-body" viewBox="0 0 120 120">
+<defs>
+<radialGradient id="axb-bg" cx="50%" cy="28%" r="88%"><stop offset="0" stop-color="#2b0f20"/><stop offset=".5" stop-color="#14070f"/><stop offset="1" stop-color="#060309"/></radialGradient>
+<radialGradient id="axb-n1" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#c41e3a" stop-opacity=".5"/><stop offset=".6" stop-color="#7a0f2a" stop-opacity=".16"/><stop offset="1" stop-color="#800020" stop-opacity="0"/></radialGradient>
+<radialGradient id="axb-n2" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#5b3fa8" stop-opacity=".42"/><stop offset="1" stop-color="#2a1a66" stop-opacity="0"/></radialGradient>
+<radialGradient id="axb-core" cx="50%" cy="0%" r="95%"><stop offset="0" stop-color="#8a1c3d"/><stop offset=".5" stop-color="#2a0a18"/><stop offset="1" stop-color="#0a0308"/></radialGradient>
+<radialGradient id="axb-neck" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ff8097" stop-opacity=".55"/><stop offset=".55" stop-color="#e8486a" stop-opacity=".16"/><stop offset="1" stop-color="#e8486a" stop-opacity="0"/></radialGradient>
+<linearGradient id="axb-suit" x1="0" y1="0" x2=".15" y2="1"><stop offset="0" stop-color="#2f2f3d"/><stop offset=".45" stop-color="#1b1b25"/><stop offset="1" stop-color="#0d0d13"/></linearGradient>
+<linearGradient id="axb-lap" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#454556"/><stop offset="1" stop-color="#1a1a23"/></linearGradient>
+<linearGradient id="axb-shirt" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffffff"/><stop offset="1" stop-color="#d6cdd3"/></linearGradient>
+<linearGradient id="axb-tie" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#c4173a"/><stop offset=".45" stop-color="#860022"/><stop offset="1" stop-color="#4c0014"/></linearGradient>
+<linearGradient id="axb-gold" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f6e3a1"/><stop offset=".5" stop-color="#d4af37"/><stop offset="1" stop-color="#9a7a1c"/></linearGradient>
+<pattern id="axb-stars" width="15" height="15" patternUnits="userSpaceOnUse" patternTransform="rotate(14)"><path d="M3.6 1.1l.55 1.75 1.75.55-1.75.55-.55 1.75-.55-1.75-1.75-.55 1.75-.55z" fill="#ffd9e0" opacity=".5"/><path d="M11 8.6l.38 1.2 1.2.38-1.2.38-.38 1.2-.38-1.2-1.2-.38 1.2-.38z" fill="#ffd9e0" opacity=".34"/><circle cx="9.4" cy="2.6" r=".34" fill="#fff" opacity=".42"/><circle cx="2.2" cy="10.8" r=".3" fill="#ff8097" opacity=".5"/></pattern>
+<pattern id="axb-tstars" width="7" height="9" patternUnits="userSpaceOnUse"><path d="M2 1.4l.34 1.06 1.06.34-1.06.34L2 4.2l-.34-1.06L.6 2.8l1.06-.34z" fill="#ffc2cf" opacity=".62"/><circle cx="5.4" cy="6.4" r=".3" fill="#fff" opacity=".5"/></pattern>
+<filter id="axb-gl" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.2"/></filter>
+</defs>
+<g>
+<rect width="120" height="120" fill="url(#axb-bg)"/>
+<circle cx="24" cy="22" r="30" fill="url(#axb-n1)"/><circle cx="100" cy="36" r="28" fill="url(#axb-n2)"/><circle cx="62" cy="40" r="46" fill="url(#axb-n1)" opacity=".75"/>
+<g fill="#fff"><circle cx="12" cy="40" r=".7" opacity=".7"/><circle cx="19" cy="14" r=".5" opacity=".6"/><circle cx="31" cy="30" r=".45" opacity=".5"/><circle cx="103" cy="18" r=".7" opacity=".7"/><circle cx="92" cy="50" r=".5" opacity=".6"/><circle cx="110" cy="62" r=".55" opacity=".6"/><circle cx="8" cy="64" r=".5" opacity=".55"/><circle cx="84" cy="9" r=".45" opacity=".55"/><circle cx="40" cy="8" r=".4" opacity=".5"/><circle cx="26" cy="56" r=".4" opacity=".45"/></g>
+<g fill="#ffb3c0"><path d="M16 26l.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7z" opacity=".6"/><path d="M99 44l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z" opacity=".6"/><path d="M106 8l.5 1.4 1.4.5-1.4.5-.5 1.4-.5-1.4-1.4-.5 1.4-.5z" opacity=".5"/></g>
+<ellipse cx="60" cy="73" rx="11" ry="8" fill="url(#axb-neck)"/>
+<g transform="translate(60 72) scale(1.1) translate(-60 -72)">
+<path d="M-2 122 L-2 108 C-2 97 9 91 26 87 L47 79 L60 106 L73 79 L94 87 C111 91 122 97 122 108 L122 122 Z" fill="url(#axb-suit)"/>
+<path d="M-2 122 L-2 108 C-2 97 9 91 26 87 L47 79 L60 106 L73 79 L94 87 C111 91 122 97 122 108 L122 122 Z" fill="url(#axb-stars)" opacity=".85"/>
+<path d="M-2 108 C-2 97 9 91 26 87 L47 79" fill="none" stroke="#fff" stroke-opacity=".24" stroke-width="1.1" stroke-linecap="round"/>
+<path d="M122 108 C122 97 111 91 94 87 L73 79" fill="none" stroke="#ff8097" stroke-opacity=".55" stroke-width="1.1" stroke-linecap="round"/>
+<path d="M50 79 L51.6 69 Q60 66.4 68.4 69 L70 79 L60 86 Z" fill="url(#axb-core)"/>
+<path d="M47 79 L53 76 L60 84 L67 76 L73 79 L60 106 Z" fill="url(#axb-shirt)"/>
+<path d="M47 79 L52 74 L61 86 L56 94 Z" fill="#fff"/><path d="M73 79 L68 74 L59 86 L64 94 Z" fill="#eee6ea"/>
+<path d="M52 74 L61 86 L56 94 M68 74 L59 86 L64 94" fill="none" stroke="#c0b3b9" stroke-width=".55" stroke-linejoin="round"/>
+<path d="M47 79 L60 106 L52 112 L33 94 L38 88 Z" fill="url(#axb-lap)"/><path d="M73 79 L60 106 L68 112 L87 94 L82 88 Z" fill="url(#axb-lap)"/>
+<path d="M47 79 L60 106 L52 112 L33 94 L38 88 Z M73 79 L60 106 L68 112 L87 94 L82 88 Z" fill="url(#axb-stars)" opacity=".5"/>
+<path d="M47 79 L33 94 M73 79 L87 94" stroke="#fff" stroke-opacity=".18" stroke-width=".8" fill="none" stroke-linecap="round"/>
+<path d="M45.4 82.8 L36.2 92.6 M74.6 82.8 L83.8 92.6 M58.6 103.6 L52.6 109.4 M61.4 103.6 L67.4 109.4" stroke="#e9cc7a" stroke-opacity=".7" stroke-width=".7" stroke-dasharray="1.1 1.7" stroke-linecap="round" fill="none"/>
+<path d="M57.4 92 L62.6 92 L66 120 L54 120 Z" fill="#e8486a" opacity=".5" filter="url(#axb-gl)"/>
+<path d="M57.6 92.2 L62.4 92.2 L66.6 123 L53.4 123 Z" fill="url(#axb-tie)"/>
+<path d="M57.6 92.2 L62.4 92.2 L66.6 123 L53.4 123 Z" fill="url(#axb-tstars)"/>
+<path d="M59 96 L59.8 96 L58.4 123 L56.2 123 Z" fill="#ff8097" opacity=".24"/>
+<path d="M56.4 82.6 Q60 81.4 63.6 82.6 L65.2 87.6 L63 92.8 Q60 94 57 92.8 L54.8 87.6 Z" fill="url(#axb-tie)"/>
+<path d="M57.2 83.8 Q60 82.9 62.8 83.8" fill="none" stroke="#ff8097" stroke-opacity=".5" stroke-width=".8" stroke-linecap="round"/>
+<path d="M57.2 91.8 Q60 93.4 62.8 91.8 L62.6 93.8 Q60 95.2 57.4 93.8 Z" fill="#2a0009" opacity=".45"/>
+<rect x="55.4" y="101" width="9.2" height="1.9" rx=".8" fill="url(#axb-gold)"/>
+<path d="M60 100.2l.5 1.2 1.2.5-1.2.5-.5 1.2-.5-1.2-1.2-.5 1.2-.5z" fill="#fff" opacity=".9"/>
+<!-- bordado celeste: constelación en hilo dorado sobre el pecho y media luna con estrella en la solapa -->
+<g fill="none" stroke="#e9cc7a" stroke-width=".5" stroke-linecap="round" stroke-linejoin="round" opacity=".92"><path d="M84.6 105.2 L89.8 100.8 L95 103.8 L92.2 109.4 L87.2 110.8 Z M89.8 100.8 L92.2 109.4"/></g>
+<g fill="url(#axb-gold)"><path d="M84.6 103.8l.42 1.1 1.1.42-1.1.42-.42 1.1-.42-1.1-1.1-.42 1.1-.42z"/><path d="M89.8 99l.58 1.5 1.5.58-1.5.58-.58 1.5-.58-1.5-1.5-.58 1.5-.58z"/><path d="M95 102.3l.4 1 1 .4-1 .4-.4 1-.4-1-1-.4 1-.4z"/><circle cx="92.2" cy="109.4" r=".7"/><circle cx="87.2" cy="110.8" r=".55"/></g>
+<path d="M40.4 90.4a3.1 3.1 0 1 0 3.2 4 2.5 2.5 0 1 1-3.2-4z" fill="url(#axb-gold)"/><path d="M45.4 90.6l.38 1 1 .38-1 .38-.38 1-.38-1-1-.38 1-.38z" fill="#f6e3a1"/>
+<g fill="#ffb3c0" opacity=".85"><circle cx="14" cy="104" r=".6"/><circle cx="24" cy="112" r=".5"/><circle cx="8" cy="116" r=".45"/></g>
+</g>
+</g>
+</symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19.5V5M5.8 11.2L12 5l6.2 6.2"/></symbol>
+</defs></svg>
+
+<div class="splash" id="splash" role="dialog" aria-modal="true" aria-labelledby="sp-name" aria-describedby="sp-tag">
+  <canvas class="sp-cv" id="sp-cv" aria-hidden="true"></canvas>
+  <div class="sp-c" id="sp-c">
+    <span class="vl-logo vl-logo--lg sp-logo" data-vl><svg class="vl-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  
+  <defs>
+    <!-- caras de la V: granate con banda de brillo metálico a lo largo del brazo -->
+    <linearGradient id="vlg-fl-spl" gradientUnits="userSpaceOnUse" x1="60.9" y1="84.0" x2="87.8" y2="70.6">
+      <stop offset="0" stop-color="#4d0010"/><stop offset=".2" stop-color="#8b0a26"/>
+      <stop offset=".42" stop-color="#cf3552"/><stop offset=".56" stop-color="#9c1234"/>
+      <stop offset=".8" stop-color="#800020"/><stop offset="1" stop-color="#5a0014"/>
+    </linearGradient>
+    <linearGradient id="vlg-fr-spl" gradientUnits="userSpaceOnUse" x1="139.1" y1="84.0" x2="112.2" y2="70.6">
+      <stop offset="0" stop-color="#2e0009"/><stop offset=".22" stop-color="#6d0018"/>
+      <stop offset=".44" stop-color="#a3122f"/><stop offset=".6" stop-color="#7a0019"/>
+      <stop offset=".85" stop-color="#5e0014"/><stop offset="1" stop-color="#3a000c"/>
+    </linearGradient>
+    <linearGradient id="vlg-edge-spl" gradientUnits="userSpaceOnUse" x1="36" y1="38" x2="164" y2="38">
+      <stop offset="0" stop-color="#ffb3c0"/><stop offset=".5" stop-color="#ff8097" stop-opacity=".5"/><stop offset="1" stop-color="#ffb3c0"/>
+    </linearGradient>
+    <linearGradient id="vlg-sheen-spl" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#ffd9df" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="vlg-rb-spl" gradientUnits="userSpaceOnUse" x1="2" y1="104" x2="198" y2="104">
+      <stop offset="0" stop-color="#c41e3a" stop-opacity="0"/><stop offset=".2" stop-color="#c41e3a" stop-opacity=".75"/>
+      <stop offset=".5" stop-color="#ff6f8a" stop-opacity=".95"/><stop offset=".8" stop-color="#c41e3a" stop-opacity=".75"/><stop offset="1" stop-color="#c41e3a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="vlg-rf-spl" gradientUnits="userSpaceOnUse" x1="2" y1="104" x2="198" y2="104">
+      <stop offset="0" stop-color="#e8486a" stop-opacity=".2"/><stop offset=".18" stop-color="#e8486a"/>
+      <stop offset=".5" stop-color="#ffa3b3"/><stop offset=".82" stop-color="#e8486a"/><stop offset="1" stop-color="#e8486a" stop-opacity=".2"/>
+    </linearGradient>
+    <radialGradient id="vlg-halo-spl" cx="100" cy="104" r="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c41e3a" stop-opacity=".4"/><stop offset=".55" stop-color="#800020" stop-opacity=".15"/><stop offset="1" stop-color="#800020" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="vlf-glow-spl" x="-40%" y="-40%" width="180%" height="180%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="vlf-v-spl" x="-30%" y="-30%" width="160%" height="170%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="5" stdDeviation="6.5" flood-color="#800020" flood-opacity=".6"/>
+    </filter>
+    <clipPath id="vlc-b-spl"><rect x="-80" y="-80" width="360" height="184"/></clipPath>
+    <clipPath id="vlc-f-spl"><rect x="-80" y="104" width="360" height="220"/></clipPath>
+    <clipPath id="vlc-v-spl"><polygon points="39.8,41.8 75.6,53.1 100.0,102.0 124.4,53.1 160.2,41.8 100.0,162.2"/></clipPath>
+    <!-- hueco por donde pasa la órbita por delante: recorta la V (funciona sobre cualquier fondo) -->
+    <mask id="vlm-v-spl" maskUnits="userSpaceOnUse" x="-40" y="-40" width="280" height="280">
+      <rect x="-40" y="-40" width="280" height="280" fill="#fff"/>
+      <g data-vl-vinv="">
+        <g transform="rotate(-18 100 104)" data-vl-tilt="">
+          <g clip-path="url(#vlc-f-spl)"><ellipse cx="100" cy="104" rx="96" ry="33" fill="none" stroke="#000" stroke-width="7.5"/></g>
+        </g>
+      </g>
+    </mask>
+  </defs>
+
+  <!-- Halo de fondo -->
+  <circle class="vl-halo" cx="100" cy="104" r="90" fill="url(#vlg-halo-spl)"/>
+
+  <!-- ÓRBITA · mitad trasera (queda detrás de la V) -->
+  <g transform="rotate(-18 100 104)" data-vl-tilt="">
+    <g clip-path="url(#vlc-b-spl)">
+      <ellipse class="vl-orbit" cx="100" cy="104" rx="96" ry="33"/>
+      <ellipse class="vl-ring vl-ring-b" cx="100" cy="104" rx="96" ry="33" stroke="url(#vlg-rb-spl)"/>
+      <g transform="translate(100 104)" class="vl-parts vl-parts-b" filter="url(#vlf-glow-spl)">
+        <g class="vl-px" style="--ph:0.02;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.09;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c3" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.15;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.21;--T:17s;--rx:103px;--ry:36px;--ps:0.7"><g class="vl-py"><circle class="vl-s c4" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.27;--T:15s;--rx:96px;--ry:33px;--ps:1.0"><g class="vl-py"><g class="vl-s c4"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px" style="--ph:0.33;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px" style="--ph:0.4;--T:15s;--rx:96px;--ry:33px;--ps:1.4"><g class="vl-py"><circle class="vl-s c2" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.46;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c4" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".5"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.52;--T:17s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><rect class="vl-s c1" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.58;--T:15s;--rx:96px;--ry:33px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c2" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px" style="--ph:0.64;--T:15s;--rx:89px;--ry:30px;--ps:1.1"><g class="vl-py"><circle class="vl-s c3" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.7;--T:15s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><g class="vl-s c1"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.76;--T:13s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c4" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.81;--T:17s;--rx:96px;--ry:33px;--ps:0.7"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.87;--T:15s;--rx:96px;--ry:33px;--ps:1.2"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.94;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+      </g>
+    </g>
+  </g>
+
+  <!-- LETRA V · granate metálico con dos caras -->
+  <g data-vl-v=""><g class="vl-v" filter="url(#vlf-v-spl)" mask="url(#vlm-v-spl)">
+    <polygon points="39.8,41.8 75.6,53.1 100.0,102.0 100.0,162.2" fill="url(#vlg-fl-spl)"/>
+    <polygon points="160.2,41.8 124.4,53.1 100.0,102.0 100.0,162.2" fill="url(#vlg-fr-spl)"/>
+    <path d="M39.8 41.8 75.6 53.1M160.2 41.8 124.4 53.1" stroke="url(#vlg-edge-spl)" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+    <path d="M41.2 45.2 100.0 159.6" stroke="#ff8097" stroke-opacity=".34" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+    <path d="M100 104.0 100 162.2" stroke="#2a0008" stroke-opacity=".6" stroke-width="1.4" fill="none"/>
+    <g clip-path="url(#vlc-v-spl)">
+      <g transform="rotate(18 100 100)"><rect class="vl-sheen" x="-70" y="10" width="46" height="190" fill="url(#vlg-sheen-spl)"/></g>
+    </g>
+  </g></g>
+
+  <!-- ÓRBITA · mitad delantera (pasa por delante de la V) -->
+  <g transform="rotate(-18 100 104)" data-vl-tilt="">
+    <g clip-path="url(#vlc-f-spl)">
+      <ellipse class="vl-orbit" cx="100" cy="104" rx="96" ry="33"/>
+      <ellipse class="vl-ring vl-ring-f" cx="100" cy="104" rx="96" ry="33" stroke="url(#vlg-rf-spl)"/>
+      <g transform="translate(100 104)" class="vl-parts vl-parts-f" filter="url(#vlf-glow-spl)">
+        <g class="vl-px" style="--ph:0.02;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.09;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c3" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.15;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.21;--T:17s;--rx:103px;--ry:36px;--ps:0.7"><g class="vl-py"><circle class="vl-s c4" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.27;--T:15s;--rx:96px;--ry:33px;--ps:1.0"><g class="vl-py"><g class="vl-s c4"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px" style="--ph:0.33;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px" style="--ph:0.4;--T:15s;--rx:96px;--ry:33px;--ps:1.4"><g class="vl-py"><circle class="vl-s c2" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.46;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c4" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".5"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.52;--T:17s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><rect class="vl-s c1" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.58;--T:15s;--rx:96px;--ry:33px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c2" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px" style="--ph:0.64;--T:15s;--rx:89px;--ry:30px;--ps:1.1"><g class="vl-py"><circle class="vl-s c3" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.7;--T:15s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><g class="vl-s c1"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.76;--T:13s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c4" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.81;--T:17s;--rx:96px;--ry:33px;--ps:0.7"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.87;--T:15s;--rx:96px;--ry:33px;--ps:1.2"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.94;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+      </g>
+    </g>
+  </g>
+</svg></span>
+    <h1 class="sp-name" id="sp-name"><span class="sr">ValidLance</span><svg class="vl-word" viewBox="-1 -9 472.0 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><g class="vl-wk vl-wk-a"><g transform="translate(0.0 0)"><polygon class="vl-wf" points="0,0 12.5,4 30,44.8 47.5,4 60,0 30,70"/></g><g transform="translate(47.0 0)"><circle cx="25" cy="45" r="19.5"/><path d="M44.5 20V70"/></g><g transform="translate(105.0 0)"><path d="M5.5 -4V70"/></g><g transform="translate(125.0 0)"><path d="M5.5 20V70"/><polygon class="vl-wd" points="5.5,-4.4 12.9,3 5.5,10.4 -1.9000000000000004,3"/></g><g transform="translate(144.0 0)"><circle cx="25" cy="45" r="19.5"/><path d="M44.5 -4V70"/></g></g><g class="vl-wk vl-wk-b"><g transform="translate(206.0 0)"><path d="M5.5 0V64.5H44" stroke-linejoin="miter"/></g><g transform="translate(253.0 0)"><circle cx="25" cy="45" r="19.5"/><path d="M44.5 20V70"/></g><g transform="translate(313.0 0)"><path d="M5.5 20V70"/><path d="M5.5 45A19.5 19.5 0 0 1 44.5 45V70"/></g><g transform="translate(371.0 0)"><path d="M38.79 31.21A19.5 19.5 0 1 0 38.79 58.79"/></g><g transform="translate(420.0 0)"><path d="M5.5 45H44.5"/><path d="M44.5 45A19.5 19.5 0 1 0 39.94 57.53"/></g></g></svg></h1>
+    <p class="sp-tag" id="sp-tag">El puente entre tu idea y tu negocio real</p>
+    <button class="sp-go" id="sp-go" type="button">Comenzar<svg class="i" aria-hidden="true"><use href="#i-right"></use></svg></button>
+    <p class="sp-hint" id="sp-hint">o pulsa en cualquier parte</p>
+  </div>
+  <!-- Bienvenida de Astro: cruza la pantalla, se detiene al centro, dice la frase y vuela a su rincón (splash_astro.js) -->
+  <div class="sp-stage" id="sp-stage">
+    <canvas class="sp-fx" id="sp-fx" aria-hidden="true"></canvas>
+    <i class="sp-beacon" id="sp-beacon" aria-hidden="true"><b></b></i>
+    <div class="sp-fig" id="sp-fig" aria-hidden="true">
+      <i class="sp-halo"></i>
+      <span class="sp-av"><span class="ax" data-ax="pres" data-vb="0 0 120" data-tone="dark"><span class="ax-badge"><svg class="ax-sv" viewBox="0 0 120 120" aria-hidden="true" focusable="false"><use href="#ax-body"></use></svg></span><canvas class="ax-cv" aria-hidden="true"></canvas></span></span>
+      <i class="sp-spk s1"></i><i class="sp-spk s2"></i><i class="sp-spk s3"></i>
+    </div>
+    <div class="sp-say" id="sp-say">
+      <p class="sp-say-k"><i></i>Astro</p>
+      <p class="sp-say-t" id="sp-say-t" aria-hidden="true"></p>
+    </div>
+    <p class="sr" id="sp-live" role="status" aria-live="polite"></p>
+  </div>
+</div>
+
+<div class="mdl" id="mdl" hidden role="dialog" aria-modal="true" aria-labelledby="mdl-t" aria-describedby="mdl-d"></div>
+
+<div class="app pre" id="app" inert>
+  <aside class="sb" aria-label="Barra lateral">
+    <a class="brand" href="#panel" data-v="panel" aria-label="ValidLance, ir al panel"><span class="vl-logo vl-logo--sm" data-vl><svg class="vl-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+  
+  <defs>
+    <!-- caras de la V: granate con banda de brillo metálico a lo largo del brazo -->
+    <linearGradient id="vlg-fl-hdr" gradientUnits="userSpaceOnUse" x1="60.9" y1="84.0" x2="87.8" y2="70.6">
+      <stop offset="0" stop-color="#4d0010"/><stop offset=".2" stop-color="#8b0a26"/>
+      <stop offset=".42" stop-color="#cf3552"/><stop offset=".56" stop-color="#9c1234"/>
+      <stop offset=".8" stop-color="#800020"/><stop offset="1" stop-color="#5a0014"/>
+    </linearGradient>
+    <linearGradient id="vlg-fr-hdr" gradientUnits="userSpaceOnUse" x1="139.1" y1="84.0" x2="112.2" y2="70.6">
+      <stop offset="0" stop-color="#2e0009"/><stop offset=".22" stop-color="#6d0018"/>
+      <stop offset=".44" stop-color="#a3122f"/><stop offset=".6" stop-color="#7a0019"/>
+      <stop offset=".85" stop-color="#5e0014"/><stop offset="1" stop-color="#3a000c"/>
+    </linearGradient>
+    <linearGradient id="vlg-edge-hdr" gradientUnits="userSpaceOnUse" x1="36" y1="38" x2="164" y2="38">
+      <stop offset="0" stop-color="#ffb3c0"/><stop offset=".5" stop-color="#ff8097" stop-opacity=".5"/><stop offset="1" stop-color="#ffb3c0"/>
+    </linearGradient>
+    <linearGradient id="vlg-sheen-hdr" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#fff" stop-opacity="0"/><stop offset=".5" stop-color="#ffd9df" stop-opacity=".55"/><stop offset="1" stop-color="#fff" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="vlg-rb-hdr" gradientUnits="userSpaceOnUse" x1="2" y1="104" x2="198" y2="104">
+      <stop offset="0" stop-color="#c41e3a" stop-opacity="0"/><stop offset=".2" stop-color="#c41e3a" stop-opacity=".75"/>
+      <stop offset=".5" stop-color="#ff6f8a" stop-opacity=".95"/><stop offset=".8" stop-color="#c41e3a" stop-opacity=".75"/><stop offset="1" stop-color="#c41e3a" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="vlg-rf-hdr" gradientUnits="userSpaceOnUse" x1="2" y1="104" x2="198" y2="104">
+      <stop offset="0" stop-color="#e8486a" stop-opacity=".2"/><stop offset=".18" stop-color="#e8486a"/>
+      <stop offset=".5" stop-color="#ffa3b3"/><stop offset=".82" stop-color="#e8486a"/><stop offset="1" stop-color="#e8486a" stop-opacity=".2"/>
+    </linearGradient>
+    <radialGradient id="vlg-halo-hdr" cx="100" cy="104" r="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#c41e3a" stop-opacity=".4"/><stop offset=".55" stop-color="#800020" stop-opacity=".15"/><stop offset="1" stop-color="#800020" stop-opacity="0"/>
+    </radialGradient>
+    <filter id="vlf-glow-hdr" x="-40%" y="-40%" width="180%" height="180%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="vlf-v-hdr" x="-30%" y="-30%" width="160%" height="170%" color-interpolation-filters="sRGB">
+      <feDropShadow dx="0" dy="5" stdDeviation="6.5" flood-color="#800020" flood-opacity=".6"/>
+    </filter>
+    <clipPath id="vlc-b-hdr"><rect x="-80" y="-80" width="360" height="184"/></clipPath>
+    <clipPath id="vlc-f-hdr"><rect x="-80" y="104" width="360" height="220"/></clipPath>
+    <clipPath id="vlc-v-hdr"><polygon points="39.8,41.8 75.6,53.1 100.0,102.0 124.4,53.1 160.2,41.8 100.0,162.2"/></clipPath>
+    <!-- hueco por donde pasa la órbita por delante: recorta la V (funciona sobre cualquier fondo) -->
+    <mask id="vlm-v-hdr" maskUnits="userSpaceOnUse" x="-40" y="-40" width="280" height="280">
+      <rect x="-40" y="-40" width="280" height="280" fill="#fff"/>
+      <g data-vl-vinv="">
+        <g transform="rotate(-18 100 104)" data-vl-tilt="">
+          <g clip-path="url(#vlc-f-hdr)"><ellipse cx="100" cy="104" rx="96" ry="33" fill="none" stroke="#000" stroke-width="7.5"/></g>
+        </g>
+      </g>
+    </mask>
+  </defs>
+
+  <!-- Halo de fondo -->
+  <circle class="vl-halo" cx="100" cy="104" r="90" fill="url(#vlg-halo-hdr)"/>
+
+  <!-- ÓRBITA · mitad trasera (queda detrás de la V) -->
+  <g transform="rotate(-18 100 104)" data-vl-tilt="">
+    <g clip-path="url(#vlc-b-hdr)">
+      <ellipse class="vl-orbit" cx="100" cy="104" rx="96" ry="33"/>
+      <ellipse class="vl-ring vl-ring-b" cx="100" cy="104" rx="96" ry="33" stroke="url(#vlg-rb-hdr)"/>
+      <g transform="translate(100 104)" class="vl-parts vl-parts-b" filter="url(#vlf-glow-hdr)">
+        <g class="vl-px" style="--ph:0.02;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.09;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c3" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.15;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.21;--T:17s;--rx:103px;--ry:36px;--ps:0.7"><g class="vl-py"><circle class="vl-s c4" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.27;--T:15s;--rx:96px;--ry:33px;--ps:1.0"><g class="vl-py"><g class="vl-s c4"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px" style="--ph:0.33;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px" style="--ph:0.4;--T:15s;--rx:96px;--ry:33px;--ps:1.4"><g class="vl-py"><circle class="vl-s c2" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.46;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c4" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".5"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.52;--T:17s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><rect class="vl-s c1" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.58;--T:15s;--rx:96px;--ry:33px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c2" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px" style="--ph:0.64;--T:15s;--rx:89px;--ry:30px;--ps:1.1"><g class="vl-py"><circle class="vl-s c3" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.7;--T:15s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><g class="vl-s c1"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.76;--T:13s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c4" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.81;--T:17s;--rx:96px;--ry:33px;--ps:0.7"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.87;--T:15s;--rx:96px;--ry:33px;--ps:1.2"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.94;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+      </g>
+    </g>
+  </g>
+
+  <!-- LETRA V · granate metálico con dos caras -->
+  <g data-vl-v=""><g class="vl-v" filter="url(#vlf-v-hdr)" mask="url(#vlm-v-hdr)">
+    <polygon points="39.8,41.8 75.6,53.1 100.0,102.0 100.0,162.2" fill="url(#vlg-fl-hdr)"/>
+    <polygon points="160.2,41.8 124.4,53.1 100.0,102.0 100.0,162.2" fill="url(#vlg-fr-hdr)"/>
+    <path d="M39.8 41.8 75.6 53.1M160.2 41.8 124.4 53.1" stroke="url(#vlg-edge-hdr)" stroke-width="1.6" stroke-linecap="round" fill="none"/>
+    <path d="M41.2 45.2 100.0 159.6" stroke="#ff8097" stroke-opacity=".34" stroke-width="1.2" stroke-linecap="round" fill="none"/>
+    <path d="M100 104.0 100 162.2" stroke="#2a0008" stroke-opacity=".6" stroke-width="1.4" fill="none"/>
+    <g clip-path="url(#vlc-v-hdr)">
+      <g transform="rotate(18 100 100)"><rect class="vl-sheen" x="-70" y="10" width="46" height="190" fill="url(#vlg-sheen-hdr)"/></g>
+    </g>
+  </g></g>
+
+  <!-- ÓRBITA · mitad delantera (pasa por delante de la V) -->
+  <g transform="rotate(-18 100 104)" data-vl-tilt="">
+    <g clip-path="url(#vlc-f-hdr)">
+      <ellipse class="vl-orbit" cx="100" cy="104" rx="96" ry="33"/>
+      <ellipse class="vl-ring vl-ring-f" cx="100" cy="104" rx="96" ry="33" stroke="url(#vlg-rf-hdr)"/>
+      <g transform="translate(100 104)" class="vl-parts vl-parts-f" filter="url(#vlf-glow-hdr)">
+        <g class="vl-px" style="--ph:0.02;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.09;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c3" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.15;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.21;--T:17s;--rx:103px;--ry:36px;--ps:0.7"><g class="vl-py"><circle class="vl-s c4" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.27;--T:15s;--rx:96px;--ry:33px;--ps:1.0"><g class="vl-py"><g class="vl-s c4"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px" style="--ph:0.33;--T:15s;--rx:96px;--ry:33px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px" style="--ph:0.4;--T:15s;--rx:96px;--ry:33px;--ps:1.4"><g class="vl-py"><circle class="vl-s c2" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.46;--T:13s;--rx:89px;--ry:30px;--ps:1.0"><g class="vl-py"><rect class="vl-s c4" x="-1.8" y="-1.8" width="3.6" height="3.6" rx=".5"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.52;--T:17s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><rect class="vl-s c1" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.58;--T:15s;--rx:96px;--ry:33px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c2" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+        <g class="vl-px" style="--ph:0.64;--T:15s;--rx:89px;--ry:30px;--ps:1.1"><g class="vl-py"><circle class="vl-s c3" r="2.3"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.7;--T:15s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><g class="vl-s c1"><rect x="-3.4" y="-.6" width="1.7" height="3" rx=".4"/><rect x="-.85" y="-2.6" width="1.7" height="5.6" rx=".4"/><rect x="1.7" y="-1.5" width="1.7" height="4.5" rx=".4"/></g></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.76;--T:13s;--rx:103px;--ry:36px;--ps:0.9"><g class="vl-py"><polygon class="vl-s c4" points="0,-3.1 2.9,2.1 -2.9,2.1"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.81;--T:17s;--rx:96px;--ry:33px;--ps:0.7"><g class="vl-py"><circle class="vl-s c1" r="2.3"/></g></g>
+        <g class="vl-px" style="--ph:0.87;--T:15s;--rx:96px;--ry:33px;--ps:1.2"><g class="vl-py"><rect class="vl-s c2" x="-4.2" y="-.9" width="8.4" height="1.8" rx=".9"/></g></g>
+        <g class="vl-px vl-minor" style="--ph:0.94;--T:15s;--rx:103px;--ry:36px;--ps:1.1"><g class="vl-py"><polygon class="vl-s c1" points="0,-3.4 2.5,0 0,3.4 -2.5,0"/></g></g>
+      </g>
+    </g>
+  </g>
+</svg></span><svg class="vl-word" viewBox="-1 -9 472.0 90" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false"><g class="vl-wk vl-wk-a"><g transform="translate(0.0 0)"><polygon class="vl-wf" points="0,0 12.5,4 30,44.8 47.5,4 60,0 30,70"/></g><g transform="translate(47.0 0)"><circle cx="25" cy="45" r="19.5"/><path d="M44.5 20V70"/></g><g transform="translate(105.0 0)"><path d="M5.5 -4V70"/></g><g transform="translate(125.0 0)"><path d="M5.5 20V70"/><polygon class="vl-wd" points="5.5,-4.4 12.9,3 5.5,10.4 -1.9000000000000004,3"/></g><g transform="translate(144.0 0)"><circle cx="25" cy="45" r="19.5"/><path d="M44.5 -4V70"/></g></g><g class="vl-wk vl-wk-b"><g transform="translate(206.0 0)"><path d="M5.5 0V64.5H44" stroke-linejoin="miter"/></g><g transform="translate(253.0 0)"><circle cx="25" cy="45" r="19.5"/><path d="M44.5 20V70"/></g><g transform="translate(313.0 0)"><path d="M5.5 20V70"/><path d="M5.5 45A19.5 19.5 0 0 1 44.5 45V70"/></g><g transform="translate(371.0 0)"><path d="M38.79 31.21A19.5 19.5 0 1 0 38.79 58.79"/></g><g transform="translate(420.0 0)"><path d="M5.5 45H44.5"/><path d="M44.5 45A19.5 19.5 0 1 0 39.94 57.53"/></g></g></svg></a>
+    <button class="proj" type="button" data-act="go" data-v="panel" id="proj-card" aria-label="Proyecto actual: abrir el panel"></button>
+    <nav class="nav" aria-label="Módulos">
+      <div class="nav-l">Proyecto</div>
+      <a class="nv" href="#panel" data-v="panel"><svg class="i" aria-hidden="true"><use href="#i-home"></use></svg><span>Panel</span></a>
+      <div class="nav-l" style="padding-top:12px">Ruta</div>
+      <a class="nv" href="#valida" data-v="valida"><svg class="i" aria-hidden="true"><use href="#i-valida"></use></svg><span>Valida</span><span class="pc" id="pc-valida"></span></a>
+      <a class="nv" href="#compite" data-v="compite"><svg class="i" aria-hidden="true"><use href="#i-compite"></use></svg><span>Compite</span><span class="pc" id="pc-compite"></span></a>
+      <a class="nv" href="#lanza" data-v="lanza"><svg class="i" aria-hidden="true"><use href="#i-lanza"></use></svg><span>Lanza</span><span class="pc" id="pc-lanza"></span></a>
+      <a class="nv" href="#genera" data-v="genera"><svg class="i" aria-hidden="true"><use href="#i-genera"></use></svg><span>Genera</span><span class="pc" id="pc-genera"></span></a>
+    </nav>
+    <div class="sb-sp"></div>
+    <a class="link-proto js-proto" href="#" target="_blank" rel="noopener" id="side-proto">
+      <b><svg class="i" aria-hidden="true"><use href="#i-ext"></use></svg>Prototipo interactivo</b>
+      <small>El flujo completo con LanderAI, la IA que genera landings con modelo de lenguaje.</small>
+    </a>
+    <button class="link-cfg" type="button" data-act="cfg-proto"><svg class="i sm" aria-hidden="true"><use href="#i-sliders"></use></svg>Cambiar enlace del prototipo</button>
+    <p class="sb-note">Aquí todo parte de cero: solo verás lo que escribas tú. Competidores, precios y costes que calcule la app son estimaciones orientativas, no datos reales de mercado.</p>
+  </aside>
+
+  <div class="main" id="main">
+    <header class="hd">
+      <div class="hd-in">
+        <div class="hd-t"><h1 id="hd-title">Panel</h1><span class="sub" id="hd-sub"></span></div>
+        <div class="hd-sp"></div>
+        <div class="hd-r">
+          <button class="mbadge" type="button" id="hd-model" data-act="model-change" hidden aria-haspopup="dialog"></button>
+          <span class="chip hide-s" id="hd-status"></span>
+          <span class="chip hide-m" id="hd-verdict"></span>
+          <button class="btn ico ghost" type="button" id="btn-theme" data-act="theme" aria-label="Cambiar entre tema claro y oscuro"><svg class="i" aria-hidden="true"><use href="#i-sun"></use></svg></button>
+          <a class="btn proto js-proto hide-xs" href="#" target="_blank" rel="noopener" id="hd-proto"><svg class="i sm" aria-hidden="true"><use href="#i-ext"></use></svg>Prototipo</a>
+          <div class="rel">
+            <button class="av" type="button" id="btn-user" data-act="menu" aria-haspopup="menu" aria-expanded="false" aria-label="Cuenta y proyecto" style="cursor:pointer"><svg class="i sm" aria-hidden="true"><use href="#i-user"></use></svg></button>
+            <div class="menu" id="menu-user" role="menu" hidden>
+              <div class="who"><b>Mi proyecto</b><span id="menu-proj"></span></div>
+              <hr>
+              <button type="button" role="menuitem" data-act="model-change" id="menu-model" hidden><svg class="i sm" aria-hidden="true"><use href="#i-swap"></use></svg>Cambiar modelo de negocio</button>
+              <button type="button" role="menuitem" data-act="cfg-proto"><svg class="i sm" aria-hidden="true"><use href="#i-ext"></use></svg>Conectar prototipo</button>
+              <button type="button" role="menuitem" data-act="theme"><svg class="i sm" aria-hidden="true"><use href="#i-moon"></use></svg>Cambiar tema</button>
+              <button type="button" role="menuitem" data-act="reset"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"></use></svg><span id="menu-reset-t">Empezar de cero</span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <main class="page" id="page">
+      <section class="view" id="v-panel" aria-label="Panel"></section>
+      <section class="view" id="v-valida" aria-label="Valida"></section>
+      <section class="view" id="v-compite" aria-label="Compite"></section>
+      <section class="view" id="v-lanza" aria-label="Lanza"></section>
+      <section class="view" id="v-genera" aria-label="Genera"></section>
+    </main>
+  </div>
+</div>
+
+<nav class="bn" aria-label="Navegación principal" inert>
+  <a href="#panel" data-v="panel"><svg class="i" aria-hidden="true"><use href="#i-home"></use></svg>Panel</a>
+  <a href="#valida" data-v="valida"><svg class="i" aria-hidden="true"><use href="#i-valida"></use></svg>Valida</a>
+  <a href="#compite" data-v="compite"><svg class="i" aria-hidden="true"><use href="#i-compite"></use></svg>Compite</a>
+  <a href="#lanza" data-v="lanza"><svg class="i" aria-hidden="true"><use href="#i-lanza"></use></svg>Lanza</a>
+  <a href="#genera" data-v="genera"><svg class="i" aria-hidden="true"><use href="#i-genera"></use></svg>Genera</a>
+  <a class="bn-proto js-proto" href="#" target="_blank" rel="noopener"><svg class="i" aria-hidden="true"><use href="#i-ext"></use></svg>Prototipo</a>
+</nav>
+
+<div id="tip" role="tooltip"></div>
+<div id="toast" role="status" aria-live="polite"></div>
+
+<!-- Astro, mentor y consultor oficial de ValidLance (chat): fija en toda la app, también sobre la selección de modelo. agent.js la despliega sola al terminar la pantalla de inicio. -->
+<div class="cp" id="cp" data-open="0" hidden>
+  <canvas class="ax-fx" id="ax-fx" aria-hidden="true"></canvas>
+  <div class="cp-scrim" id="cp-scrim" data-act="agent-close" aria-hidden="true"></div>
+  <i class="cp-home" id="cp-home" aria-hidden="true"></i>
+  <section class="cp-panel" id="cp-panel" role="dialog" aria-modal="false" aria-labelledby="cp-t" aria-describedby="cp-note">
+    <div class="cp-grab" id="cp-grab" aria-hidden="true"><i></i></div>
+    <header class="cp-hd" id="cp-hd">
+      <span class="cp-av" id="cp-av" aria-hidden="true"><span class="ax" data-ax="head" data-vb="8 6 104"><span class="ax-badge"><svg class="ax-sv" viewBox="8 6 104 104" aria-hidden="true" focusable="false"><use href="#ax-body"></use></svg></span><canvas class="ax-cv" aria-hidden="true"></canvas></span></span>
+      <div class="cp-ti">
+        <div class="cp-nm"><h2 id="cp-t" tabindex="-1">Astro</h2><span class="cp-pill">Mentor oficial</span></div>
+        <p class="cp-st"><span class="cp-on" aria-hidden="true"></span><span id="cp-st">Tu mentor y consultor en ValidLance</span></p>
+      </div>
+      <button class="cp-ib cp-sd" type="button" id="cp-side" data-act="agent-side" aria-label="Mover a Astro al otro lado de la pantalla" title="Mover a Astro al otro lado"><svg class="i sm" aria-hidden="true"><use href="#i-swap"></use></svg></button>
+      <button class="cp-ib" type="button" id="cp-new" data-act="agent-new" aria-label="Nueva conversación" title="Nueva conversación"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"></use></svg></button>
+      <button class="cp-ib cp-aw" type="button" id="cp-away" data-act="agent-away" aria-label="Apartar a Astro: cierra el chat y la deja como una estrella pequeña" title="Apartar a Astro"><svg class="i sm" aria-hidden="true"><use href="#i-down"></use></svg></button>
+      <button class="cp-ib" type="button" id="cp-x" data-act="agent-close" aria-label="Cerrar el chat con Astro" title="Cerrar"><svg class="i sm" aria-hidden="true"><use href="#i-x"></use></svg></button>
+    </header>
+    <div class="cp-ctx" id="cp-ctx" role="group" aria-label="Contexto actual"></div>
+    <div class="cp-log" id="cp-log" role="log" aria-live="polite" aria-relevant="additions" aria-label="Conversación con Astro" tabindex="0"></div>
+    <div class="cp-qr" id="cp-qr" role="group" aria-label="Respuestas rápidas" hidden></div>
+    <form class="cp-cmp" id="cp-form" autocomplete="off" novalidate>
+      <label class="sr" for="cp-in">Escribe tu mensaje a Astro</label>
+      <textarea id="cp-in" rows="1" maxlength="600" placeholder="Cuéntale tu idea a Astro…" enterkeyhint="send"></textarea>
+      <button class="cp-send" type="submit" id="cp-send" aria-label="Enviar mensaje" disabled><svg class="i" aria-hidden="true"><use href="#i-send"></use></svg></button>
+    </form>
+    <p class="cp-note" id="cp-note"><span id="cp-note-t">Astro es un mentor virtual simulado: responde con reglas y con los datos de tu panel, sin IA externa. No es asesoramiento legal ni financiero.</span></p>
+  </section>
+  <div class="cp-tease" id="cp-tease" hidden>
+    <button class="cp-tz" type="button" id="cp-tz" data-act="agent-open"></button>
+    <button class="cp-tc" type="button" data-act="agent-tease-x" aria-label="No mostrar más sugerencias de Astro"><svg class="i sm" aria-hidden="true"><use href="#i-x"></use></svg></button>
+  </div>
+  <div class="cp-pres" id="cp-pres" hidden role="region" aria-labelledby="cp-pres-t">
+    <div class="cp-pres-b" id="cp-pres-b">
+      <button class="cp-pres-x" type="button" data-act="pres-close" aria-label="Cerrar la presentación de Astro"><svg class="i sm" aria-hidden="true"><use href="#i-x"></use></svg></button>
+      <p class="cp-pres-k" id="cp-pres-k"></p>
+      <h3 class="cp-pres-t" id="cp-pres-t"></h3>
+      <div class="cp-pres-c" id="cp-pres-c"></div>
+      <div class="cp-pres-a" id="cp-pres-a"></div>
+    </div>
+    <button class="cp-pres-v" type="button" id="cp-pres-v" data-act="agent-open" aria-label="Abrir el chat con Astro"><i class="cp-halo" aria-hidden="true"></i><span class="ax" data-ax="pres" data-vb="0 0 120"><span class="ax-badge"><svg class="ax-sv" viewBox="0 0 120 120" aria-hidden="true" focusable="false"><use href="#ax-body"></use></svg></span><canvas class="ax-cv" aria-hidden="true"></canvas></span><i class="cp-pres-ping" aria-hidden="true"></i><i class="cp-spk s1" aria-hidden="true"></i><i class="cp-spk s2" aria-hidden="true"></i><i class="cp-spk s3" aria-hidden="true"></i></button>
+  </div>
+  <button class="cp-fab" type="button" id="cp-fab" data-act="agent-toggle" aria-haspopup="dialog" aria-expanded="false" aria-controls="cp-panel" aria-label="Abrir el chat con Astro, tu mentor de ValidLance" aria-describedby="cp-fab-d"><span class="cp-fab-v"><span class="ax" data-ax="fab" data-vb="8 6 104"><span class="ax-badge"><svg class="ax-sv" viewBox="8 6 104 104" aria-hidden="true" focusable="false"><use href="#ax-body"></use></svg></span><canvas class="ax-cv" aria-hidden="true"></canvas></span><span class="cp-dot" aria-hidden="true"></span></span><span class="cp-orb" aria-hidden="true"><i class="o-core"></i><i class="o-star"></i><i class="o-ring"></i></span><i class="cp-spk s1" aria-hidden="true"></i><i class="cp-spk s2" aria-hidden="true"></i></button>
+  <span class="sr" id="cp-fab-d">Puedes arrastrarme por la pantalla; con el teclado, Mayús más las flechas.</span>
+</div>
+
+<div class="modal" id="m-proto" hidden role="dialog" aria-modal="true" aria-labelledby="m-proto-t">
+  <div class="modal-c">
+    <div>
+      <h3 id="m-proto-t">Conectar el prototipo interactivo</h3>
+      <p style="margin-top:6px">Este enlace se usa en todos los botones "Prototipo" del panel. Pega la dirección donde tengas publicado el prototipo.</p>
+    </div>
+    <div class="field">
+      <label class="lbl" for="proto-url">Dirección del prototipo</label>
+      <input class="in" id="proto-url" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://…">
+      <p class="help" id="proto-help">Debe empezar por https:// o ser el nombre de un archivo, por ejemplo LaunchValid_Prototipo_LanderAI_v2.html.</p>
+    </div>
+    <div class="chips" id="proto-presets"></div>
+    <div class="row sp">
+      <button class="btn ghost" type="button" data-act="proto-close">Cancelar</button>
+      <div class="row">
+        <a class="btn js-proto-test" href="#" target="_blank" rel="noopener" id="proto-test"><svg class="i sm" aria-hidden="true"><use href="#i-ext"></use></svg>Probar enlace</a>
+        <button class="btn pri" type="button" data-act="proto-save">Guardar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<noscript><div class="boot-msg" role="alert"><div>
+  <h2>ValidLance necesita JavaScript</h2>
+  <p>ValidLance es una app interactiva que funciona en tu navegador, sin cuentas ni servidores. Ahora mismo JavaScript está desactivado o este visor no lo permite.</p>
+  <ol><li>Abre <b>index.html</b> directamente con Chrome, Firefox, Edge o Safari (no desde una vista previa de archivos, correo o mensajería).</li><li>Si usas una vista previa, pulsa <b>Compartir</b> o el menú <b>⋮</b> y elige <b>Abrir en el navegador</b>.</li></ol>
+</div></div></noscript>
+<div class="boot-msg" id="boot-fail" role="alert" hidden><div>
+  <h2>ValidLance no ha terminado de cargar</h2>
+  <p>Puede ser un visor limitado o un guardado antiguo que no se lee bien. Prueba esto, de más suave a más fuerte:</p>
+  <div class="bm-row"><button type="button" class="bm-main" id="boot-retry">Reintentar</button><button type="button" id="boot-clear">Borrar datos y reintentar</button><button type="button" id="boot-skip">Seguir de todos modos</button></div>
+  <p>Si sigue igual, ábrelo con Chrome o Safari desde el menú Compartir.</p>
+</div></div>
+<div class="boot-bar" id="store-note" role="status" hidden><span>Aquí no se pueden guardar tus datos: se perderán al cerrar. Si es una vista previa, abre el archivo con Chrome o Safari.</span><button type="button" id="store-ok">Entendido</button></div>
+
+<script src="app.js" defer></script>
+</body>
+</html>
