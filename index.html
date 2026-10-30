@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="description" content="Panel de control de ValidLance: valida, compite, lanza y genera tu idea de negocio.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0406'/%3E%3Cpath d='M12 16h13l7 22 7-22h13L38 50H26z' fill='%23c41e3a'/%3E%3C/svg%3E">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>ValidLance</title>
 <meta property="og:type" content="website">
 <meta property="og:locale" content="es_ES">
@@ -20,7 +22,7 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="ValidLance">
-<link rel="stylesheet" href="styles.css">
+<link rel="stylesheet" href="styles.css?v=dd49899d62">
 </head>
 <body>
 
@@ -266,6 +268,7 @@
     <p class="sp-hint" id="sp-hint">o pulsa en cualquier parte</p>
   </div>
   <!-- Bienvenida de Astro: cruza la pantalla, se detiene al centro, dice la frase y vuela a su rincón (splash_astro.js) -->
+  <button class="sp-skip" id="sp-skip" type="button">Saltar intro</button>
   <div class="sp-stage" id="sp-stage">
     <canvas class="sp-fx" id="sp-fx" aria-hidden="true"></canvas>
     <i class="sp-beacon" id="sp-beacon" aria-hidden="true"><b></b></i>
@@ -476,7 +479,7 @@
       <small>El flujo completo con LanderAI, la IA que genera landings con modelo de lenguaje.</small>
     </a>
     <button class="link-cfg" type="button" data-act="cfg-proto"><svg class="i sm" aria-hidden="true"><use href="#i-sliders"></use></svg>Cambiar enlace del prototipo</button>
-    <p class="sb-note">Aquí todo parte de cero: solo verás lo que escribas tú. Competidores, precios y costes que calcule la app son estimaciones orientativas, no datos reales de mercado.</p>
+    <p class="sb-note">Aquí todo parte de cero: solo verás lo que escribas tú. Si tu idea encaja en un nicho verificado, Compite te enseña competidores reales con su web y su precio publicado; el resto de cifras son estimaciones con su fuente o su método.</p>
   </aside>
 
   <div class="main" id="main">
@@ -500,6 +503,8 @@
               <button type="button" role="menuitem" data-act="cfg-proto"><svg class="i sm" aria-hidden="true"><use href="#i-ext"></use></svg>Conectar prototipo</button>
               <button type="button" role="menuitem" data-act="cfg-rag"><svg class="i sm" aria-hidden="true"><use href="#i-bolt"></use></svg>IA con tu proyecto (RAG)<small class="menu-s" id="menu-rag-s"></small></button>
               <button type="button" role="menuitem" data-act="menu-plan"><svg class="i sm" aria-hidden="true"><use href="#i-star"></use></svg><span id="menu-plan-t">Pasar a Premium</span><small class="menu-s" id="menu-plan-s">Gratuito</small></button>
+              <button type="button" role="menuitem" data-act="bk-save"><svg class="i sm" aria-hidden="true"><use href="#i-down"></use></svg>Guardar copia de mi proyecto</button>
+              <button type="button" role="menuitem" data-act="bk-load"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"></use></svg>Recuperar una copia</button>
               <button type="button" role="menuitem" data-act="theme"><svg class="i sm" aria-hidden="true"><use href="#i-moon"></use></svg>Cambiar tema</button>
               <button type="button" role="menuitem" data-act="reset"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"></use></svg><span id="menu-reset-t">Empezar de cero</span></button>
             </div>
@@ -521,11 +526,11 @@
 
 <nav class="bn" aria-label="Navegación principal" inert>
   <a href="#hub" data-v="hub"><svg class="i" aria-hidden="true"><use href="#i-hub"></use></svg>Centro</a>
-  <a href="#panel" data-v="panel"><svg class="i" aria-hidden="true"><use href="#i-home"></use></svg>Panel</a>
-  <a href="#valida" data-v="valida"><svg class="i" aria-hidden="true"><use href="#i-valida"></use></svg>Valida</a>
   <a href="#compite" data-v="compite"><svg class="i" aria-hidden="true"><use href="#i-compite"></use></svg>Compite</a>
-  <a href="#lanza" data-v="lanza"><svg class="i" aria-hidden="true"><use href="#i-lanza"></use></svg>Lanza</a>
   <a href="#genera" data-v="genera"><svg class="i" aria-hidden="true"><use href="#i-genera"></use></svg>Genera</a>
+  <a href="#valida" data-v="valida"><svg class="i" aria-hidden="true"><use href="#i-valida"></use></svg>Valida</a>
+  <a href="#lanza" data-v="lanza"><svg class="i" aria-hidden="true"><use href="#i-lanza"></use></svg>Lanza</a>
+  <a href="#panel" data-v="panel"><svg class="i" aria-hidden="true"><use href="#i-home"></use></svg>Panel</a>
   <a class="bn-proto js-proto" href="#" target="_blank" rel="noopener"><svg class="i" aria-hidden="true"><use href="#i-ext"></use></svg>Prototipo</a>
 </nav>
 
@@ -587,7 +592,7 @@
     <div class="field">
       <label class="lbl" for="proto-url">Dirección del prototipo</label>
       <input class="in" id="proto-url" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://…">
-      <p class="help" id="proto-help">Debe empezar por https:// o ser el nombre de un archivo, por ejemplo LaunchValid_Prototipo_LanderAI_v2.html.</p>
+      <p class="help" id="proto-help">Debe empezar por https:// o ser el nombre de un archivo, por ejemplo mi-prototipo.html.</p>
     </div>
     <div class="chips" id="proto-presets"></div>
     <div class="row sp">
@@ -663,6 +668,7 @@
 </div></div>
 <div class="boot-bar" id="store-note" role="status" hidden><span>Aquí no se pueden guardar tus datos: se perderán al cerrar. Si es una vista previa, abre el archivo con Chrome o Safari.</span><button type="button" id="store-ok">Entendido</button></div>
 
-<script src="app.js" defer></script>
+<script src="app.js?v=dd49899d62" defer></script>
+<script>if ('serviceWorker' in navigator && location.protocol === 'https:') addEventListener('load', function () { navigator.serviceWorker.register('sw.js').catch(function () {}); });</script>
 </body>
 </html>

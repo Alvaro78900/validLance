@@ -1034,12 +1034,13 @@ LV.ACT.theme = function () {
 function applyProto() {
   // sin enlace configurado, los accesos al prototipo abren el cuadro para conectarlo (opcional)
   $$('.js-proto').forEach((a) => { a.href = S.protoUrl || '#'; });
+  document.documentElement.classList.toggle('has-proto', !!S.protoUrl); // el prototipo solo aparece si hay uno configurado
   const t = $('#proto-test'); if (t) t.href = S.protoUrl || '#';
   const sm = $('#side-proto small'); if (sm) sm.textContent = S.protoUrl ? 'Abre tu prototipo interactivo en otra pestaña.' : 'Opcional: conecta aquí el enlace de tu propio prototipo.';
 }
 LV.applyProto = applyProto;
 const PRESETS = [
-  { l: 'Archivo local', u: 'LaunchValid_Prototipo_LanderAI_v2.html' },
+  { l: 'Archivo local', u: 'mi-prototipo.html' },
   { l: 'Servicio en Render', u: 'https://TU-SERVICIO.onrender.com/' },
 ];
 function validProto(u) { return /^https?:\/\/[^\s]+$/i.test(u) || /^[\w.\-\/]+\.html?$/i.test(u); }
@@ -1047,7 +1048,7 @@ LV.ACT['cfg-proto'] = function () {
   closeMenu();
   const m = $('#m-proto'); $('#proto-url').value = S.protoUrl; m.hidden = false;
   $('#proto-presets').innerHTML = PRESETS.map((p, i) => '<button class="chip" type="button" data-act="proto-preset" data-i="' + i + '">' + esc(p.l) + '</button>').join('');
-  $('#proto-help').textContent = 'Debe empezar por https:// o ser el nombre de un archivo, por ejemplo LaunchValid_Prototipo_LanderAI_v2.html.';
+  $('#proto-help').textContent = 'Debe empezar por https:// o ser el nombre de un archivo, por ejemplo mi-prototipo.html.';
   setTimeout(() => $('#proto-url').focus(), 30);
 };
 LV.ACT['proto-preset'] = function (el) { $('#proto-url').value = PRESETS[Number(el.dataset.i)].u; };
@@ -1144,6 +1145,57 @@ window.addEventListener('hashchange', () => {
   if (VIEWS.indexOf(v) >= 0 && v !== S.view) LV.go(v);
 });
 
+})();
+
+/* ============================================================
+   Copia de seguridad del proyecto (todo vive en este navegador)
+   · «Guardar copia»: descarga un archivo .json con el proyecto, el perfil, la ruta y la conversación con Astro.
+   · «Recuperar copia»: lee ese archivo y sustituye el proyecto de este navegador (pide confirmación).
+   · Sirve para cambiar de móvil o de navegador, y como seguro en iPhone: Safari puede borrar los datos de una web
+     que lleva días sin abrirse si no está añadida a la pantalla de inicio.
+   API: LV.backup = { save, load, keys }
+   ============================================================ */
+(function () {
+'use strict';
+const PFX = 'lv_';
+function keys() { const out = []; try { for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.indexOf(PFX) === 0) out.push(k); } } catch (e) { /* sin almacenamiento */ } return out.sort(); }
+function stamp() { const d = new Date(); const p = (n) => String(n).padStart(2, '0'); return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()); }
+function save() {
+  const data = {}; keys().forEach((k) => { try { data[k] = localStorage.getItem(k); } catch (e) { /* clave ilegible */ } });
+  if (!Object.keys(data).length) { LV.toast('Todavía no hay nada que guardar', 'info'); return; }
+  const name = (LV.state && LV.state.idea && LV.state.idea.name ? LV.state.idea.name : 'proyecto').replace(/[^\wáéíóúñÁÉÍÓÚÑ -]/g, '').trim().slice(0, 40) || 'proyecto';
+  const blob = new Blob([JSON.stringify({ app: 'ValidLance', v: 1, at: new Date().toISOString(), name: name, data: data }, null, 1)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = url; a.download = 'ValidLance_copia_' + stamp() + '.json'; document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 1500);
+  LV.toast('Copia guardada: consérvala para recuperar tu proyecto', 'check');
+}
+let inp = null;
+function load() {
+  if (!inp) {
+    inp = document.createElement('input'); inp.type = 'file'; inp.accept = '.json,application/json'; inp.hidden = true; document.body.appendChild(inp);
+    inp.addEventListener('change', () => {
+      const f = inp.files && inp.files[0]; inp.value = ''; if (!f) return;
+      if (f.size > 4e6) { LV.toast('Ese archivo es demasiado grande para ser una copia de ValidLance', 'alert'); return; }
+      const r = new FileReader();
+      r.onload = () => {
+        let j = null; try { j = JSON.parse(String(r.result)); } catch (e) { j = null; }
+        if (!j || j.app !== 'ValidLance' || !j.data || typeof j.data !== 'object') { LV.toast('Ese archivo no es una copia de ValidLance', 'alert'); return; }
+        const when = j.at ? new Date(j.at).toLocaleDateString('es-ES') : 'otro día';
+        let ok = false; try { ok = window.confirm('¿Sustituir el proyecto de este navegador por la copia «' + (j.name || 'proyecto') + '» del ' + when + '?'); } catch (e) { ok = false; }
+        if (!ok) return;
+        try { keys().forEach((k) => localStorage.removeItem(k)); Object.keys(j.data).forEach((k) => { if (k.indexOf(PFX) === 0 && typeof j.data[k] === 'string') localStorage.setItem(k, j.data[k]); }); }
+        catch (e) { LV.toast('No se pudo recuperar: el navegador no deja guardar datos', 'alert'); return; }
+        location.reload();
+      };
+      r.readAsText(f);
+    });
+  }
+  inp.click();
+}
+LV.ACT['bk-save'] = function () { const m = document.getElementById('menu-user'); if (m) m.hidden = true; save(); };
+LV.ACT['bk-load'] = function () { const m = document.getElementById('menu-user'); if (m) m.hidden = true; load(); };
+LV.backup = { save: save, load: load, keys: keys };
 })();
 
 /* ============================================================
@@ -3275,7 +3327,8 @@ function analyze(inp) {
   const v = v0 * T.arpu;
   const life = Math.max(2, Math.round(life0 * T.life));
   const min = Math.round(min0 * T.min * sc.min / 50) * 50;
-  const ratio = budget / min;
+  // sin dinero el capital es tu tiempo: validar con una landing y canales gratuitos no exige el lanzamiento mínimo completo
+  const ratio = budget > 0 ? budget / min : 0.35;
   const cac = Math.round(cac0 * (sat > 70 ? 1.2 : sat < 45 ? 0.85 : 1) * (sig.nicho ? 0.85 : 1) * (sig.comunidad ? 0.9 : 1) * (sig.local && scope === 'local' ? 0.9 : 1));
   const unit = v / 12 * mg;
   const ltv = Math.round(unit * life);
@@ -5789,6 +5842,305 @@ VE.mount = function (root, opts) {
 })();
 
 /* ============================================================
+   Compite · nichos con competidores REALES verificados (consulta de octubre de 2026)
+   · Cada nicho: palabras que lo detectan (k), sector del motor (sec), búsqueda para ampliar (q),
+     competidores reales (c) y cifras con fuente (f). Nada de esto es inventado: nombre, web y qué hace
+     son de cada empresa; los precios y comisiones solo aparecen si la fuente citada los publica, con su moneda.
+   · Si la fuente la escribe un competidor (blog de una marca rival) se marca con «comp: true» y se dice en pantalla.
+   · Los precios cambian: se muestran con la fecha de la fuente y un enlace a la web del competidor para confirmarlos.
+   · Sin nicho detectado, Compite lo dice y ofrece búsquedas reales (Google, Google Play, App Store, Product Hunt, Google Trends).
+   API: LV.niches = { list, detect(text), byId(id), forRan(), links(text, niche), stamp }
+   ============================================================ */
+(function () {
+'use strict';
+const norm = (s) => String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ');
+const S_ = (n, u, y, comp) => ({ n: n, u: u, y: y, comp: !!comp });
+const G = (n) => 'https://www.google.com/search?q=' + encodeURIComponent(n);
+const C = (n, u, what, model, price, src) => ({ n: n, u: u === '?' ? G(n + ' web oficial') : u, find: u === '?', what: what, model: model, price: price || '', src: src == null ? -1 : src });
+
+// ---------- fuentes consultadas ----------
+const SRC = [
+  /* 0 */ S_('OCU · Apps para pisos compartidos', 'https://www.ocu.org/vivienda-y-energia/comprar-vender-alquilar/noticias/apps-para-pisos-compartidos', '19 feb 2026'),
+  /* 1 */ S_('Finny · Precios de Splitwise 2026', 'https://getfinny.app/blog/splitwise-pricing-2026', '2026', true),
+  /* 2 */ S_('Tricount · Qué pasa con Premium', 'https://tricount.com/en/what-happened-with-premium', '2026'),
+  /* 3 */ S_('Flatastic · Premium', 'https://www.flatastic-app.com/en/premium/', '2026'),
+  /* 4 */ S_('Uniplaces · Webs de alojamiento para estudiantes en Madrid (guía 2026)', 'https://www.uniplaces.com/city-explorer/las-mejores-webs-para-encontrar-alojamiento-para-estudiantes-en-madrid-guia-2026/', '2026', true),
+  /* 5 */ S_('Diario de Avisos · Dónde encontrar profesores particulares en España', 'https://diariodeavisos.elespanol.com/canariasenred/donde-encontrar-profesores-particulares-en-espana-las-7-mejores-opciones-de-2026/', '5 jun 2026'),
+  /* 6 */ S_('Pensight · Comisión de Preply a profesores 2026', 'https://pensight.com/post/how-much-does-preply-actually-cost-tutors-2026-commission-breakdown', 'mediados de 2026', true),
+  /* 7 */ S_('App Store España · Wuolah', 'https://apps.apple.com/es/app/wuolah-apuntes-educaci%C3%B3n/id1240782595', 'oct 2026'),
+  /* 8 */ S_('WWWhat’s New · Apps para aprender idiomas en 2026', 'https://wwwhatsnew.com/2026/04/29/apps-aprender-idiomas-2026-comparativa-cual-funciona/', '29 abr 2026'),
+  /* 9 */ S_('Quaderno · Mejores plataformas de cursos online', 'https://quaderno.io/es/articulos/plataformas-cursos-online', '15 nov 2024'),
+  /* 10 */ S_('SensAI · Freeletics vs BetterMe vs Fitify (precios del App Store de EE. UU.)', 'https://www.sensai.fit/es/blog/freeletics-vs-betterme-vs-fitify-2026', '30 sep 2026', true),
+  /* 11 */ S_('Nutrola · Apps de nutrición en España 2026 (precios aproximados)', 'https://nutrola.app/en/blog/best-10-nutrition-apps-in-spain-2026', '19 abr 2026', true),
+  /* 12 */ S_('Xataka · Wetaca duplica beneficios con la suscripción', 'https://www.xataka.com/empresas-y-economia/wetaca-duplica-beneficios-gracias-al-clasico-truco-mundo-digital-engancharte-a-suscripcion', '2 sep 2025'),
+  /* 13 */ S_('Zenoti · Apps de citas para peluquerías 2026 (precios en $)', 'https://www.zenoti.com/es/thecheckin/best-hair-salon-scheduling-apps-2026', '2026', true),
+  /* 14 */ S_('Qamarero · Software de reservas para restaurantes 2026 (sin IVA)', 'https://qamarero.com/blog/mejores-software-de-reservas-para-restaurantes/', '2026', true),
+  /* 15 */ S_('WWWhat’s New · Wallapop vs Vinted en España', 'https://wwwhatsnew.com/2026/06/02/wallapop-vs-vinted-segunda-mano-espana-historia-modelo-negocio/', '2 jun 2026'),
+  /* 16 */ S_('Printful · Guía de impresión bajo demanda en España', 'https://www.printful.com/es/blog/guia-print-on-demand-espana', '30 oct 2025', true),
+  /* 17 */ S_('Genbeta · Gudog y HouseMyDog se fusionan', 'https://www.genbeta.com/actualidad/gudog-housemydog-se-fusionan-para-consolidar-airbnb-perros', '6 feb 2019'),
+  /* 18 */ S_('Guía Fiscal · Mejor programa de facturación para autónomos 2026 (enlace de afiliado en Quipu)', 'https://guiafiscal.es/comparativas/mejor-programa-facturacion-autonomos/', '2026'),
+  /* 19 */ S_('Público · Las mejores apps para empezar a ahorrar en 2026', 'https://www.publico.es/ahorro-inteligente/mejores-apps-empezar-ahorrar-2026.html', '30 dic 2025'),
+  /* 20 */ S_('Finect · Mejores roboadvisors en España (2026)', 'https://www.finect.com/invertir/roboadvisors', '27 oct 2026'),
+  /* 21 */ S_('Cuánto me cuesta · Precio del psicólogo (actualizado abril 2026)', 'https://cuantomecuesta.com/es/psicologo/', 'abr 2026'),
+  /* 22 */ S_('KeepCoding · Plataformas para trabajar online desde casa en España', 'https://keepcoding.io/blog/mejores-plataformas-trabajos-online-desde-casa/', '24 feb 2025'),
+  /* 23 */ S_('Ecommerce Platforms · Creadores de webs para pequeñas empresas 2026 (precios en $)', 'https://ecommerce-platforms.com/es/articles/best-website-builder-for-small-business', '10 ago 2026'),
+];
+
+// ---------- nichos ----------
+const N = [
+  { id: 'gastos-piso', l: 'Gastos compartidos y pisos compartidos', sec: 'finanzas', q: 'app gastos compartidos piso',
+    k: 'piso compartido|pisos compartidos|companeros de piso|compis de piso|gastos compartidos|dividir gastos|repartir gastos|reparto de gastos|quien debe|deudas entre amigos|bote comun|turnos de limpieza|tareas del piso|convivencia',
+    c: [
+      C('Splitwise', 'https://www.splitwise.com', 'Reparte gastos de grupo y calcula quién debe a quién.', 'Freemium', 'Gratis con límite diario de gastos y anuncios · Pro ≈ 4,99 $/mes o 39,99 $/año (EE. UU.)', 1),
+      C('Tricount (de bunq)', 'https://tricount.com', 'Gastos de grupo y viajes; integrado con el banco bunq.', 'Gratis', 'Ya no hace falta Premium en la app nueva', 2),
+      C('Settle Up', 'https://settleup.io', 'Gastos de grupo con varias monedas y liquidación de deudas.', 'Freemium', ''),
+      C('Kittysplit', '?', 'Reparto de gastos desde el navegador, sin instalar ni registrarse.', 'Gratis', '', 0),
+      C('Flatastic', 'https://www.flatastic-app.com', 'Organiza el piso: turnos de limpieza, lista de la compra y gastos.', 'Freemium', 'Premium «por menos que un café al mes»; 20 % menos al año', 3),
+      C('OurFlat', 'https://apps.apple.com/app/id1530007409', 'Todo en uno para pisos: compra, tareas con historial, gastos y chat.', 'Gratis', '', 0),
+    ],
+    f: ['La OCU recomienda 8 apps para pisos compartidos y todas son gratuitas, algunas con versión de pago: el reto no es existir, es hacer algo que ellas no hagan.'], fs: [0] },
+  { id: 'alojamiento-estudiantes', l: 'Alojamiento para estudiantes', sec: 'viajes', q: 'alquiler habitacion estudiantes',
+    k: 'alojamiento para estudiantes|habitacion para estudiantes|alquilar (una )?habitacion|alquiler de habitaciones|piso de estudiantes|pisos para estudiantes|residencia de estudiantes|erasmus|buscar piso|compartir piso con',
+    c: [
+      C('Uniplaces', 'https://www.uniplaces.com', 'Habitaciones y estudios verificados con reserva online.', 'Tarifa al inquilino', 'Tarifa de servicio ≈ un mes de alquiler', 4),
+      C('Spotahome', 'https://www.spotahome.com', 'Pisos y habitaciones con videotour y protección del depósito (empresa de Madrid).', 'Tarifa de servicio', '', 4),
+      C('HousingAnywhere', 'https://housinganywhere.com', 'Estancias de media duración en Europa con pago seguro.', 'Tarifa al reservar', '', 4),
+      C('Badi', 'https://badi.com', 'App para alquilar habitaciones en pisos compartidos, con verificación y chat.', 'Sin tarifa al inquilino', '', 4),
+      C('Idealista', 'https://www.idealista.com', 'El mayor portal inmobiliario de España.', 'Anuncios', 'Sin tarifa de plataforma (algunas agencias cobran ≈ un mes)', 4),
+      C('Fotocasa', 'https://www.fotocasa.es', 'Segundo portal inmobiliario de España, con mapa de calor.', 'Anuncios', '', 4),
+    ],
+    f: ['Habitación individual en piso compartido en Madrid: 450 a 700 € al mes; habitación doble: 350 a 500 € (guía 2026 de Uniplaces, que es competidor).'], fs: [4] },
+  { id: 'clases-particulares', l: 'Clases particulares y tutorías', sec: 'educacion', q: 'profesor particular clases',
+    k: 'clases particulares|profesor particular|profesores particulares|tutorias|tutor particular|repaso escolar|refuerzo escolar|clases de repaso|selectividad|ebau\\b|deberes',
+    c: [
+      C('Tusclasesparticulares', 'https://www.tusclasesparticulares.com', 'Clases presenciales y online en toda España, con reseñas verificadas.', 'Anuncios de profesores', '', 5),
+      C('Superprof', 'https://www.superprof.es', 'Una de las mayores redes de profesores: asignaturas, idiomas, música y deporte.', 'Suscripción del alumno', '', 5),
+      C('GoStudent', 'https://www.gostudent.org/es-es', 'Tutorías online individuales con seguimiento del progreso (primaria a bachillerato).', 'Paquetes de clases', '', 5),
+      C('Classgap', 'https://www.classgap.com', 'Clases online con aula virtual y videollamada.', 'Por clase', '', 5),
+      C('Preply', 'https://preply.com/es', 'Clases online, sobre todo de idiomas, con profesores nativos.', 'Comisión al profesor', 'Se queda el 100 % de la 1.ª clase de cada alumno y del 33 % al 18 % después', 6),
+      C('Cronoshare', 'https://www.cronoshare.com', 'Pides presupuesto y te escriben profesores de tu zona.', 'Pago por contacto (profesional)', '', 5),
+    ],
+    f: [], fs: [] },
+  { id: 'apuntes', l: 'Apuntes y estudio universitario', sec: 'educacion', q: 'apuntes universidad',
+    k: 'apuntes|examenes resueltos|compartir apuntes|vender apuntes|resumenes de asignaturas|estudiar para examenes|tarjetas de estudio|flashcards',
+    c: [
+      C('Wuolah', 'https://www.wuolah.com', 'Apuntes, ejercicios y exámenes de compañeros por asignatura (empresa española).', 'Gratis con publicidad', 'Gratis · 3,6 ★ con unas 2.400 valoraciones en el App Store de España', 7),
+      C('Studocu', 'https://www.studocu.com/es-es', 'Plataforma internacional de apuntes y resúmenes por universidad.', 'Freemium', ''),
+      C('Quizlet', 'https://quizlet.com/es', 'Tarjetas de estudio y tests.', 'Freemium', ''),
+      C('GoConqr', 'https://www.goconqr.com/es', 'Mapas mentales, fichas y tests para estudiar.', 'Freemium', ''),
+    ],
+    f: [], fs: [] },
+  { id: 'idiomas', l: 'Aprender idiomas', sec: 'educacion', q: 'app aprender idiomas',
+    k: 'idioma|idiomas|aprender ingles|clases de ingles|ingles para|aprender aleman|aprender frances|aprender chino|intercambio de idiomas',
+    c: [
+      C('Duolingo', 'https://www.duolingo.com', 'Lecciones cortas y hábito diario.', 'Freemium', 'Gratis · Super 7,33 €/mes', 8),
+      C('Babbel', 'https://es.babbel.com', 'Cursos estructurados para adultos, 14 idiomas.', 'Suscripción', '6,99 a 12,99 €/mes', 8),
+      C('Busuu', 'https://www.busuu.com/es', 'Nativos corrigen tus ejercicios escritos y de voz.', 'Freemium', 'Gratis · Premium 5,95 €/mes', 8),
+      C('italki', 'https://www.italki.com/es', 'Clases individuales por videollamada.', 'Por clase', '12 a 30 €/h con profesor · 5 a 10 €/h con tutor', 8),
+      C('Tandem', 'https://www.tandem.net/es', 'Intercambio de idiomas con nativos.', 'Freemium', '', 8),
+    ],
+    f: [], fs: [] },
+  { id: 'cursos-online', l: 'Cursos online e infoproductos', sec: 'educacion', q: 'vender curso online plataforma',
+    k: 'curso online|cursos online|infoproducto|vender (mi|un) curso|ebook|masterclass|formacion online|academia online|comunidad de pago|membresia',
+    c: [
+      C('Hotmart', 'https://hotmart.com/es', 'Vende cursos y productos digitales con pagos y afiliados.', 'Comisión por venta', '9,9 % + 0,50 € por venta', 9),
+      C('Udemy', 'https://www.udemy.com', 'Mercado global de cursos: publicar es gratis.', 'Comisión por venta', 'Comisión alta, sin porcentaje en la fuente', 9),
+      C('Domestika', 'https://www.domestika.org/es', 'Cursos creativos (diseño, ilustración, foto) de una empresa nacida en España.', 'Venta de cursos', ''),
+      C('Podia', 'https://www.podia.com', 'Tienda propia de cursos sin comisiones.', 'Suscripción', 'Desde 39 $/mes', 9),
+      C('Teachable', 'https://www.teachable.com', 'Escuela online propia con plan gratis.', 'Freemium', '', 9),
+    ],
+    f: ['La fuente de comisiones es de noviembre de 2024: confírmalas en la web de cada plataforma.'], fs: [9] },
+  { id: 'fitness', l: 'Entrenamiento y fitness', sec: 'salud', q: 'app entrenamiento en casa',
+    k: 'entrenador personal|app de entrenamiento|entrenamiento online|entrenamientos en casa|rutinas de ejercicio|ejercicio en casa|fitness|crossfit|hiit|musculacion|entrenar en casa',
+    c: [
+      C('Freeletics', 'https://www.freeletics.com/es', 'Entrenos con peso corporal y un «coach» que se adapta.', 'Freemium', 'Gratis 34 entrenos · Coach de 34,99 a 79,99 $ (planes de 3 a 12 meses)', 10),
+      C('Fitify', 'https://gofitify.com', 'Más de 900 ejercicios y entrenador con IA.', 'Freemium', 'Pro 69,99 $/año', 10),
+      C('BetterMe', '?', 'Entrenos en casa, planes de comidas y seguimiento.', 'Suscripción', 'De 4,99 a 41,99 $ según plan', 10),
+      C('Nike Training Club', '?', 'Entrenos guiados de Nike.', 'Gratis', ''),
+    ],
+    f: ['Precios del App Store de EE. UU. (30 sep 2026) en una comparativa escrita por otra app de fitness.'], fs: [10] },
+  { id: 'nutricion-app', l: 'Nutrición, dietas y calorías', sec: 'nutricion', q: 'app dieta calorias',
+    k: 'calorias|contar calorias|dieta|dietas|nutricion|nutricionista|menu semanal|plan de comidas|comer sano|macros|ayuno intermitente',
+    c: [
+      C('Yazio', 'https://www.yazio.com/es', 'Contador de calorías con ayuno y recetas.', 'Freemium', 'PRO ≈ 4 a 6 €/mes', 11),
+      C('Lifesum', 'https://lifesum.com', 'Planes de dieta, incluida la mediterránea.', 'Freemium', '≈ 8 a 10 €/mes', 11),
+      C('MyFitnessPal', 'https://www.myfitnesspal.com/es', 'Gran base de alimentos; versión gratis con anuncios.', 'Freemium', '≈ 10 a 12 €/mes', 11),
+      C('Fitia', 'https://fitia.app/es', 'Plan de comidas y conteo de calorías en español.', 'Freemium', ''),
+      C('Noom', 'https://www.noom.com/es', 'Programa conductual para perder peso.', 'Suscripción', '≈ 45 a 60 €/mes', 11),
+    ],
+    f: ['Precios aproximados de una comparativa escrita por otra app de nutrición (abril 2026).'], fs: [11] },
+  { id: 'comida-preparada', l: 'Comida preparada a domicilio (táperes)', sec: 'nutricion', q: 'comida casera a domicilio tuppers',
+    k: 'taper|tapers|tupper|tuppers|comida casera a domicilio|comida preparada|menu semanal a domicilio|batch cooking|comida a domicilio|dark kitchen|cocina fantasma',
+    c: [
+      C('Wetaca', 'https://wetaca.com', 'Táperes de comida casera con suscripción semanal (Madrid).', 'Suscripción', 'Beneficio neto de 602.000 € en 2024 y 94 empleados', 12),
+      C('Glovo', 'https://glovoapp.com/es', 'Reparto de restaurantes y supermercados.', 'Comisión al restaurante', ''),
+      C('Too Good To Go', 'https://www.toogoodtogo.com/es', 'Packs de comida sobrante de tiendas a precio reducido.', 'Comisión', ''),
+    ],
+    f: [], fs: [] },
+  { id: 'citas-belleza', l: 'Reservas para peluquerías y estética', sec: 'tecnologia', q: 'software citas peluqueria',
+    k: 'reservas para peluquerias|app para peluquerias|software para peluquerias|citas para peluquerias|agenda de citas|citas online|reservar cita|app para (barberias|salones|centros de estetica)|gestion de (salones|centros de estetica)',
+    c: [
+      C('Booksy', 'https://booksy.com/es-es', 'Reservas para salones con escaparate para clientes.', 'Suscripción', 'Desde 29,99 $/mes', 13),
+      C('Fresha', 'https://www.fresha.com/es', 'Agenda y gestión; cobra por clientes nuevos de su escaparate.', 'Suscripción + comisión', '19,95 $/mes · 20 % por cliente nuevo del escaparate (mín. 6 $)', 13),
+      C('Treatwell', 'https://www.treatwell.es', 'Escaparate de reservas de belleza en España.', 'Comisión', ''),
+      C('Square Citas', '?', 'Página de reservas y recordatorios.', 'Freemium', 'Gratis para una persona · 29 $ para equipos', 13),
+      C('SimplyBook.me', 'https://simplybook.me/es', 'Reservas generalistas con muchas integraciones.', 'Suscripción', 'Desde 9,90 $', 13),
+    ],
+    f: ['Precios en dólares de una comparativa escrita por otro software del sector.'], fs: [13] },
+  { id: 'restaurantes', l: 'Software para restaurantes y reservas', sec: 'tecnologia', q: 'software reservas restaurante',
+    k: 'software para restaurantes|app para restaurantes|reservas de mesa|reservas para restaurantes|carta digital|carta qr|comandas|tpv para|gestion de restaurantes|app para bares|para hosteleria',
+    c: [
+      C('CoverManager', 'https://www.covermanager.com/es', 'Libro de reservas, plano de sala y mensajes a clientes.', 'Suscripción', 'Precio por presupuesto', 14),
+      C('TheFork Manager', 'https://www.theforkmanager.com/es', 'Reservas con visibilidad en el portal TheFork.', 'Suscripción', 'Precio por presupuesto', 14),
+      C('Restoo', '?', 'Reservas por planes.', 'Suscripción', '39 a 249 €/mes (sin IVA)', 14),
+      C('resmio', 'https://www.resmio.com/es', 'Reservas con plan básico gratis.', 'Freemium', '0 € básico · 69,90 a 129,90 €/mes (sin IVA, 12 meses)', 14),
+      C('OpenTable', 'https://www.opentable.es', 'Reservas con red de comensales.', 'Suscripción + comisión', '149 a 299 €/mes + 1,50 € por comensal de su red', 14),
+      C('Last.app', 'https://www.last.app', 'TPV para restaurantes con reservas (TheBook).', 'Suscripción', '', 14),
+    ],
+    f: ['Comparativa escrita por Qamarero, otro software de restaurantes (169 a 249 €/mes).'], fs: [14] },
+  { id: 'moda-segunda-mano', l: 'Moda de segunda mano', sec: 'moda', q: 'vender ropa segunda mano',
+    k: 'segunda mano|ropa usada|moda circular|vintage|reventa de ropa|vender ropa|armario|ropa de segunda',
+    c: [
+      C('Vinted', 'https://www.vinted.es', 'Ropa y complementos con envío propio.', 'Tasa al comprador', 'Vendedor sin comisión · comprador 3–5 % + tasa fija · facturó 1.100 M€ en 2025', 15),
+      C('Wallapop', 'https://es.wallapop.com', 'Segunda mano de todo, nacida en Barcelona.', 'Comisión con envío', 'Comisión al vendedor si usa el envío · ≈ 100 M€ de facturación', 15),
+      C('Micolet', 'https://www.micolet.com', 'Tienda online que compra y revende ropa de segunda mano (Bilbao).', 'Compra-venta', ''),
+      C('Vestiaire Collective', 'https://es.vestiairecollective.com', 'Moda de lujo de segunda mano verificada.', 'Comisión', ''),
+    ],
+    f: [], fs: [] },
+  { id: 'camisetas', l: 'Camisetas y merchandising personalizado', sec: 'moda', q: 'camisetas personalizadas',
+    k: 'camisetas|camiseta|sudaderas|merchandising|merch|estampado|serigrafia|ropa personalizada|impresion bajo demanda|print on demand|mi propia marca de ropa|marca de ropa',
+    c: [
+      C('Printful', 'https://www.printful.com/es', 'Impresión bajo demanda conectada a tu tienda: sin stock, pagas al vender.', 'Coste por producto', '', 16),
+      C('Printify', 'https://printify.com', 'Red de imprentas bajo demanda.', 'Freemium', ''),
+      C('Gelato', 'https://www.gelato.com/es', 'Impresión bajo demanda con producción local.', 'Freemium', ''),
+      C('Spreadshirt', 'https://www.spreadshirt.es', 'Diseña y vende camisetas en su mercado.', 'Comisión', ''),
+      C('La Tostadora', 'https://www.latostadora.com', 'Mercado español de diseños impresos bajo demanda.', 'Comisión', ''),
+    ],
+    f: [], fs: [] },
+  { id: 'mascotas', l: 'Cuidado y paseo de mascotas', sec: 'mascotas', q: 'cuidador de perros',
+    k: 'perro|perros|paseador|paseo de perros|cuidador de mascotas|guarderia canina|residencia canina|mascota|mascotas|gatos',
+    c: [
+      C('Gudog', 'https://gudog.com', 'Cuidadores que alojan a tu perro en su casa («el Airbnb de los perros», empresa española).', 'Comisión', 'Más de 25.000 cuidadores tras fusionarse con HouseMyDog (2019)', 17),
+      C('Rover', 'https://www.rover.com/es', 'Mercado global de cuidadores y paseadores.', 'Comisión', ''),
+      C('Tiendanimal', 'https://www.tiendanimal.es', 'Tienda online de productos para mascotas.', 'Venta', ''),
+    ],
+    f: [], fs: [] },
+  { id: 'experiencias', l: 'Tours y experiencias turísticas', sec: 'viajes', q: 'tours actividades',
+    k: 'free tour|free tours|tours por|excursiones|guia turistico|actividades turisticas|experiencias para turistas|visitas guiadas|rutas turisticas',
+    c: [
+      C('Civitatis', 'https://www.civitatis.com/es', 'Tours, excursiones y free tours en español (empresa española).', 'Comisión', ''),
+      C('GetYourGuide', 'https://www.getyourguide.es', 'Actividades y entradas en todo el mundo.', 'Comisión', ''),
+      C('Freetour.com', 'https://www.freetour.com/es', 'Free tours con propina.', 'Pago por reserva (guía)', ''),
+      C('Airbnb Experiencias', 'https://www.airbnb.es/s/experiences', 'Experiencias con anfitriones locales.', 'Comisión', ''),
+    ],
+    f: [], fs: [] },
+  { id: 'eventos-bodas', l: 'Bodas y eventos', sec: 'eventos', q: 'organizar boda proveedores',
+    k: 'boda|bodas|wedding|organizacion de eventos|organizar eventos|cumpleanos|fiestas|catering|wedding planner',
+    c: [
+      C('Bodas.net', 'https://www.bodas.net', 'Directorio de proveedores y organizador de bodas con app.', 'Publicidad de proveedores', ''),
+      C('Zankyou', 'https://www.zankyou.es', 'Organizador de bodas y lista de regalos.', 'Comisión y publicidad', ''),
+      C('Eventbrite', 'https://www.eventbrite.es', 'Venta de entradas para eventos.', 'Comisión por entrada', ''),
+      C('Fever', 'https://feverup.com', 'Descubrir y vender planes y eventos (empresa española).', 'Comisión', ''),
+    ],
+    f: [], fs: [] },
+  { id: 'facturacion', l: 'Facturación y gestión para autónomos', sec: 'tecnologia', q: 'programa facturacion autonomos',
+    k: 'programa de facturacion|software de facturacion|app de facturacion|hacer facturas|emitir facturas|facturacion electronica|verifactu|contabilidad para|gestoria online|iva trimestral|modelo 303|gestion para autonomos|app para autonomos',
+    c: [
+      C('Holded', 'https://www.holded.com/es', 'Facturación, contabilidad e inventario en la nube.', 'Suscripción', '15 a 29 €/mes (sin IVA) · prueba de 14 días', 18),
+      C('Quipu', 'https://getquipu.com', 'Facturación e impuestos para autónomos.', 'Suscripción', '17 €/mes (sin IVA) · prueba de 15 días', 18),
+      C('Anfix', 'https://www.anfix.com', 'Facturación y contabilidad online.', 'Suscripción', '5,99 €/mes (sin IVA)', 18),
+      C('Contasimple', 'https://www.contasimple.com', 'Facturación con plan gratis.', 'Freemium', 'Gratis (12 documentos al año) · 12,95 €/mes', 18),
+      C('FacturaDirecta', 'https://www.facturadirecta.com', 'Facturación con plan gratis.', 'Freemium', 'Gratis (10 clientes) · 10 €/mes', 18),
+    ],
+    f: ['Según la fuente, VeriFactu será obligatorio para los autónomos el 1 de julio de 2027.'], fs: [18] },
+  { id: 'finanzas-personales', l: 'Ahorro y control de gastos', sec: 'finanzas', q: 'app control de gastos ahorro',
+    k: 'ahorrar dinero|app de ahorro|control de gastos|controlar gastos|controlar mis gastos|gastos mensuales|finanzas personales|presupuesto mensual|educacion financiera|llegar a fin de mes|controlar suscripciones',
+    c: [
+      C('Fintonic', 'https://www.fintonic.com', 'Conecta tus bancos y detecta gastos duplicados (supervisada por el Banco de España).', 'Gratis + financiación', '', 19),
+      C('Monefy', '?', 'Apunta ingresos y gastos a mano, por categorías.', 'Freemium', '', 19),
+      C('Bobby', 'https://apps.apple.com/app/id1059152023', 'Controla tus suscripciones y avisa antes de renovar.', 'Freemium', '', 19),
+      C('Findit', 'https://www.finditapp.es', 'Compara precios de supermercados y gasolineras.', 'Gratis', '', 19),
+    ],
+    f: [], fs: [] },
+  { id: 'inversion', l: 'Inversión para principiantes', sec: 'inversion', q: 'invertir roboadvisor',
+    k: 'invertir en bolsa|invertir mis ahorros|invertir su dinero|aprender a invertir|roboadvisor|robo advisor|fondos indexados|etfs?\\b|bolsa de valores|trading|broker|cartera de inversion|criptomonedas|bitcoin',
+    c: [
+      C('Indexa Capital', 'https://indexacapital.com/es', 'Carteras de fondos indexados gestionadas.', 'Comisión anual', '0,5 % total · mínimo 1.000 €', 20),
+      C('MyInvestor', 'https://myinvestor.es', 'Roboadvisor y fondos indexados.', 'Comisión anual', '0,40 a 0,43 % · mínimo 150 €', 20),
+      C('Finizens', 'https://finizens.com', 'Carteras indexadas.', 'Comisión anual', '0,48 % · mínimo 1.000 €', 20),
+      C('Inbestme', 'https://www.inbestme.com/es', 'Carteras de ETF y fondos.', 'Comisión anual', '≈ 0,65 %', 20),
+      C('Revolut', 'https://www.revolut.com/es-ES', 'Banco digital con inversión automática.', 'Comisión anual', '≈ 0,95 %', 20),
+    ],
+    f: ['Asesorar o gestionar dinero ajeno exige autorización de la CNMV y no se pueden prometer rentabilidades.'], fs: [] },
+  { id: 'psicologia', l: 'Psicología y bienestar emocional online', sec: 'salud', q: 'psicologo online',
+    k: 'psicologo|psicologa|psicologia|terapia online|ansiedad|salud mental|bienestar emocional|coach emocional|mindfulness|meditacion',
+    c: [
+      C('Buencoco', 'https://www.buencoco.es', 'Psicólogos online por videollamada.', 'Por sesión', 'Desde 45 € por sesión', 21),
+      C('Therapyside', 'https://www.therapyside.com', 'Terapia online con psicólogos colegiados.', 'Por sesión', '', 21),
+      C('ifeel', 'https://ifeelonline.com', 'Bienestar emocional online para personas y empresas (empresa española).', 'Suscripción y empresas', ''),
+      C('Doctoralia', 'https://www.doctoralia.es', 'Buscador de profesionales con reserva de cita.', 'Suscripción del profesional', ''),
+    ],
+    f: ['Una sesión online cuesta de media entre 40 y 70 € en España y la presencial entre 50 y 70 € (abril 2026).'], fs: [21] },
+  { id: 'freelance-marketing', l: 'Servicios freelance: marketing, diseño y redes', sec: 'emprendimiento', q: 'freelance redes sociales marketing',
+    k: 'gestion de redes sociales|gestionar (las )?redes sociales de|community manager|agencia de marketing|marketing digital para|diseno grafico para|servicios de diseno|social media manager|freelance de (marketing|diseno|redes)|contenido para empresas',
+    c: [
+      C('Malt', 'https://www.malt.es', 'Freelancers para empresas europeas, con pago seguro.', 'Comisión', '', 22),
+      C('Fiverr', 'https://www.fiverr.com/es', 'Servicios cerrados («gigs») a precio fijo, mercado global.', 'Comisión', '', 22),
+      C('Workana', 'https://www.workana.com/es', 'Proyectos por encargo, muy usada en Latinoamérica.', 'Comisión', '', 22),
+      C('Freelancer.es', 'https://www.freelancer.es', 'Proyectos puntuales o largos.', 'Comisión', '', 22),
+    ],
+    f: [], fs: [] },
+  { id: 'webs-pymes', l: 'Páginas web para pequeños negocios', sec: 'tecnologia', q: 'crear pagina web negocio',
+    k: 'crear paginas web|hacer paginas web|diseno web para|desarrollo web para|webs para (negocios|pymes|empresas|autonomos)|paginas web para (negocios|pymes|empresas)|tiendas online para (negocios|comercios)',
+    c: [
+      C('Wix', 'https://es.wix.com', 'Creador de webs todo en uno.', 'Suscripción', '≈ 17 $/mes (pago anual) · tienda desde ≈ 27 $', 23),
+      C('Shopify', 'https://www.shopify.com/es', 'Tiendas online.', 'Suscripción', '29 $/mes (pago anual)', 23),
+      C('Squarespace', 'https://www.squarespace.com', 'Webs de diseño cuidado.', 'Suscripción', '≈ 16 $/mes (pago anual)', 23),
+      C('Hostinger', 'https://www.hostinger.es', 'Hosting y creador barato; la renovación es más cara.', 'Suscripción', '1,99 $/mes (48 meses)', 23),
+      C('WordPress', 'https://es.wordpress.org', 'Gestor de contenidos libre; pagas hosting y dominio.', 'Hosting aparte', '≈ 4 a 25 $/mes de hosting', 23),
+    ],
+    f: [], fs: [] },
+];
+N.forEach((n) => { n.re = new RegExp('(?:^|[^a-z])(?:' + n.k + ')', 'g'); });
+
+/** Nicho que mejor encaja con el texto: { niche, score, hits } o null. Gana el que más señales distintas tiene. */
+function detect(text) {
+  const t = ' ' + norm(text) + ' '; let best = null;
+  N.forEach((n, i) => {
+    const seen = {}; (t.match(n.re) || []).forEach((m) => { seen[m.replace(/^[^a-z]/, '')] = 1; });
+    const sc = Object.keys(seen).length; if (!sc) return;
+    if (!best || sc > best.score || (sc === best.score && i < best.i)) best = { niche: n, score: sc, hits: Object.keys(seen), i: i };
+  });
+  return best ? { niche: best.niche, score: best.score, hits: best.hits } : null;
+}
+const byId = (id) => N.find((n) => n.id === id) || null;
+/** El nicho del análisis guardado (lo fija Compite al analizar; si no, se vuelve a detectar del texto). */
+function forRan() {
+  const r = LV.state && LV.state.compite && LV.state.compite.ran; if (!r) return null;
+  if (r.niche === '') return null; if (r.niche) return byId(r.niche);
+  const d = detect((r.name || '') + ' ' + (r.text || '')); return d ? d.niche : null;
+}
+// palabras que no sirven para buscar
+const STOP = /^(un|una|unos|unas|el|la|los|las|de|del|y|o|a|al|en|con|por|para|que|se|su|sus|mi|mis|tu|tus|es|ser|como|mas|muy|sin|sobre|entre|hasta|desde|cada|todo|toda|todos|quiero|crear|montar|hacer|lanzar|app|aplicacion|plataforma|web|online|idea|negocio|empresa|servicio|ayuda|ayudar|permite|personas|gente|cobraria|cobrar|euros|mes|ano|empezaria|conseguiria|usuarios|clientes|espana|madrid|barcelona|grupo|grupos)$/;
+function keywords(text) {
+  return norm(text).replace(/[^a-z0-9ñ ]/g, ' ').split(' ').filter((w) => w.length > 3 && !STOP.test(w) && !/^\d/.test(w)).filter((w, i, a) => a.indexOf(w) === i).slice(0, 4).join(' ');
+}
+/** Búsquedas reales para ampliar la lista de competidores (se abren en otra pestaña). */
+function links(text, niche) {
+  const q = (niche && niche.q) || keywords(text) || 'idea de negocio';
+  const e = encodeURIComponent;
+  return [
+    { l: 'Google', s: 'Empresas y webs en España', u: 'https://www.google.com/search?q=' + e(q + ' España') },
+    { l: 'Google Play', s: 'Apps que ya lo hacen', u: 'https://play.google.com/store/search?q=' + e(q) + '&c=apps&hl=es' },
+    { l: 'App Store', s: 'Apps de iPhone en España', u: 'https://www.google.com/search?q=' + e('site:apps.apple.com/es ' + q) },
+    { l: 'Product Hunt', s: 'Startups recientes', u: 'https://www.producthunt.com/search?q=' + e(q) },
+    { l: 'Google Trends', s: 'Interés de búsqueda en España', u: 'https://trends.google.es/trends/explore?geo=ES&q=' + e(q) },
+  ];
+}
+LV.niches = { list: N, src: SRC, detect: detect, byId: byId, forRan: forRan, links: links, keywords: keywords, stamp: 'octubre de 2026' };
+})();
+
+/* ============================================================
    Compite · lectura del texto libre
    Convierte una frase (o un párrafo) escrito con naturalidad en los datos que necesita el análisis:
    sector, modelo de negocio y estructura de precio, ámbito, presupuesto, precio, público y nivel de detalle.
@@ -5888,6 +6240,8 @@ function pickPreset(modelId, st, t) {
 }
 
 // ---------- dinero: presupuesto y precio ----------
+/** Presupuesto que la persona dio en su perfil (Casi nada = 0 €, hasta 500 € ≈ 300 €…); null si no lo dijo. */
+function profileBudget() { try { return LV.route && LV.state && LV.state.me && LV.state.me.cap ? LV.route.capEur(LV.state.me) : null; } catch (e) { return null; } }
 function moneyIn(raw) {
   const t = norm(raw); const out = [];
   const re = /(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?\s*(k\b|mil\b|millones\b|millon\b)?\s*(€|euros?\b|eur\b)?/g;
@@ -5898,7 +6252,7 @@ function moneyIn(raw) {
     if (!cur && mult && /^\s*[a-z]/.test(t.slice(m.index + m[0].length)) === false && false) continue;
     let v = Number(m[1].replace(/\./g, '') + (m[2] ? '.' + m[2] : ''));
     if (mult === 'k' || mult === 'mil') v *= 1000; else if (mult === 'millones' || mult === 'millon') v *= 1e6;
-    if (!isFinite(v) || v <= 0) continue;
+    if (!isFinite(v) || v < 0 || (v === 0 && !cur)) continue; // «con 0 €» es un presupuesto; un 0 suelto, no
     const i = m.index, j = m.index + m[0].length;
     out.push({ v, before: t.slice(Math.max(0, i - 38), i), after: t.slice(j, j + 32), hasCur: !!cur });
   }
@@ -5926,7 +6280,7 @@ function money(raw) {
     if (kind === 'budget' && !budget) budget = { v: Math.round(x.v), cue: budCue };
   });
   const t = norm(raw);
-  if (!budget && /sin presupuesto|presupuesto (cero|0|nulo)|no tengo (presupuesto|dinero|capital)|sin capital|sin inversion/.test(t)) budget = { v: 0, cue: true };
+  if (!budget && /sin presupuesto|presupuesto (cero|0|nulo)|no tengo (presupuesto|dinero|capital)|sin capital|sin inversion|sin dinero|sin gastar|cero euros|con nada de dinero|sin un euro|gastar 0/.test(t)) budget = { v: 0, cue: true };
   return { price, budget };
 }
 
@@ -5962,10 +6316,13 @@ function deriveName(raw) {
   if (f.split(/\s+/).length < 2) f = f0;
   const cut = f.match(/\s+(?:que|donde|cobrar[ií]a|cobrar[ií]amos|a partir de|para que|y\s+\w+(?:ar|er|ir)(?:lo|la|los|las|se)?)\s/i);
   if (cut && f.slice(0, cut.index).split(/\s+/).length >= 3) f = f.slice(0, cut.index);
-  f = f.split(/\s+/).filter(Boolean).slice(0, 9).join(' ');
-  if (f.length > 56) f = f.slice(0, 55).replace(/\s+\S*$/, '');
+  const hp = f.match(/^(\S+(?:\s+\S+)?)\s+(?:que\s+(?:ayuda|ayude|permite|sirve|conecta|ensena|enseña)\s+a|para\s+ayudar\s+a)\s+(.+?)(?:\s+a\s+\S+(?:ar|er|ir)\b.*)?$/i);
+  if (hp && hp[2]) f = hp[1] + ' para ' + hp[2];
+  f = f.split(/\s+/).filter(Boolean).slice(0, 6).join(' ');
+  if (f.length > 42) f = f.slice(0, 41).replace(/\s+\S*$/, '');
   f = f.replace(/\s+(?:con|a|por|y)\s+(?:cuota|precio|tarifa|suscripci[oó]n|comisi[oó]n)(?:\s+(?:de|del))?$/i, '');
-  f = f.replace(/\s+(?:de|del|y|con|en|a|para|por|los|las|el|la|que|toda|todo|un|una|mi|tu|su)$/i, '');
+  const cut2 = f.match(/\s+(?:con|que|donde|hech[oa]s?|cobrando|vendiendo)\s/i); if (cut2 && f.slice(0, cut2.index).split(/\s+/).length >= 3) f = f.slice(0, cut2.index);
+  for (let i = 0; i < 4; i++) { const g = f.replace(/\s+(?:de|del|y|con|en|a|para|por|los|las|el|la|que|toda|todo|un|una|mi|tu|su|hech[oa]s?)$/i, ''); if (g === f) break; f = g; }
   return { v: f ? capFirst(f) : '', auto: true, from: 'resumen' };
 }
 
@@ -6037,6 +6394,9 @@ function parse(raw, ov) {
   let secId = 'general', conf = 'baja';
   if (!auto) { secId = ov.sector; conf = 'tuyo'; } else if (top && top.score >= 1.5) { secId = top.id; conf = top.score >= 4 && top.score >= 1.6 * (sec2 ? sec2.score : 0) ? 'alta' : 'media'; }
   else if (ov.secPrior) { secId = ov.secPrior; conf = 'media'; } // sin pistas en el texto, el modelo de negocio elegido da el sector de partida
+  const nz = LV.niches ? LV.niches.detect(text) : null;
+  res.niche = nz ? { id: nz.niche.id, label: nz.niche.l, hits: nz.hits } : null;
+  if (auto && nz && nz.niche.sec && nz.niche.sec !== secId) { secId = nz.niche.sec; conf = 'alta'; } // «pisos compartidos» es finanzas del hogar, no reformas
   const secObj = BasicAI.getSector(secId);
   res.sector = { id: secObj.id, label: secObj.label, auto: auto, conf: conf, rank: rank.slice(0, 3) };
   // modelo de negocio
@@ -6056,6 +6416,7 @@ function parse(raw, ov) {
   const bOv = ov.budget !== '' && ov.budget != null && isFinite(Number(ov.budget));
   if (bOv) res.budget = { v: Math.max(0, Math.round(Number(ov.budget))), src: 'tuyo' };
   else if (mn.budget) res.budget = { v: mn.budget.v, src: 'texto' };
+  else if (profileBudget() != null) res.budget = { v: profileBudget(), src: 'perfil' };
   else res.budget = { v: DEFAULT_BUDGET, src: 'supuesto' };
   res.price = mn.price ? { v: mn.price.v, per: mn.price.per } : null;
   // nombre y público
@@ -6065,7 +6426,7 @@ function parse(raw, ov) {
   res.audience = audienceOf(text);
   res.need = needOf(text);
   // nivel de detalle
-  res.detail = detailOf(text, res.name.v, { noBudget: !mn.budget && !bOv, noWhere: !sc && sAuto });
+  res.detail = detailOf(text, res.name.v, { noBudget: !mn.budget && !bOv && profileBudget() == null, noWhere: !sc && sAuto });
   // entrada para el motor
   res.inp = { name: res.name.v || 'Tu idea', text: text, sector: secObj.id, budget: res.budget.v, scope: res.scope.id, type: typeHint(mid, st) };
   // semilla para el módulo de precio
@@ -6469,7 +6830,7 @@ const reduced = () => !!(window.matchMedia && matchMedia('(prefers-reduced-motio
 const f1 = (n) => fn(n, 1);
 const pctT = (v) => { const r = Math.round(v * 10) / 10; return fn(r, r % 1 ? 1 : 0) + ' %'; };
 // estado de la pantalla que no se guarda: análisis en marcha, tarjetas abiertas, filtros y nodos abiertos
-const ui = { run: null, edit: false, adj: false, cards: {}, ready: {}, cf: 'all', open: {}, nodes: {}, add: false, timer: 0, edges: [], hl: null, rd: null, liveT: 0, why: false };
+const ui = { run: null, edit: false, adj: false, cards: { real: true }, ready: {}, cf: 'all', open: {}, nodes: {}, add: false, timer: 0, edges: [], hl: null, rd: null, liveT: 0, why: false };
 
 // ---------- modos: vacío, análisis en marcha o informe propio ----------
 function mode() { if (ui.run) return 'run'; return S.compite.ran ? 'own' : 'empty'; }
@@ -6494,7 +6855,7 @@ function snapshot() { const d = read(); return { name: d.name.v, text: d.text, s
 function isStale() { const r = S.compite.ran; if (!r) return false; return r.key !== keyNow(); }
 /** Copia ligera de la lectura para guardarla con el informe. */
 function slim(d) {
-  return JSON.parse(JSON.stringify({ sector: d.sector, model: d.model, scope: d.scope, budget: d.budget, price: d.price, audience: d.audience, need: d.need, name: d.name, detail: { level: d.detail.level, label: d.detail.label, score: d.detail.score, msg: d.detail.msg, words: d.detail.words, missing: d.detail.missing }, seed: d.seed }));
+  return JSON.parse(JSON.stringify({ niche: d.niche || null, sector: d.sector, model: d.model, scope: d.scope, budget: d.budget, price: d.price, audience: d.audience, need: d.need, name: d.name, detail: { level: d.detail.level, label: d.detail.label, score: d.detail.score, msg: d.detail.msg, words: d.detail.words, missing: d.detail.missing }, seed: d.seed }));
 }
 
 // ---------- etiquetas de procedencia ----------
@@ -6532,7 +6893,7 @@ function gauge(v, base, cls) {
 const riskCls = (s) => (s >= 3 ? 'risk' : s === 2 ? 'warn' : 'ok');
 
 // ---------- 1 · una caja: describe tu idea ----------
-const SRC_TAG = { texto: 'del texto', supuesto: 'supuesto', tuyo: 'tuyo' };
+const SRC_TAG = { texto: 'del texto', supuesto: 'supuesto', tuyo: 'tuyo', perfil: 'de tu perfil' };
 function chipsHtml(d) {
   if (!d || d.empty) return '<p class="in-empty">' + ic('eye', 'sm') + '<span>Escribe tu idea y verás aquí, al momento, lo que entendemos: sector, modelo de negocio, ámbito y presupuesto.</span></p>';
   const c = (k, v, tag, tone, tip) => '<li class="in-c ' + tone + '"' + (tip ? ' title="' + esc(tip) + '"' : '') + '><span class="k">' + k + '</span><b>' + esc(v) + '</b><i class="tg">' + tag + '</i></li>';
@@ -6735,13 +7096,13 @@ function finish() {
   const r = ui.run; if (!r) return;
   const d = r.det; ui.run = null; ui.edit = false;
   if (d.name.auto) { const prev = S.compite.autoName; if (!S.idea.name.trim() || S.idea.name === prev) S.idea.name = d.name.v; S.compite.autoName = d.name.v; }
-  S.compite.ran = Object.assign({}, r.inp, { key: r.key, det: slim(d), at: Date.now() });
+  S.compite.ran = Object.assign({}, r.inp, { key: r.key, det: slim(d), at: Date.now(), niche: d.niche ? d.niche.id : '' });
   S.compite.adopt = {}; S.compite.sel = null;
   if (!S.idea.pitch.trim()) S.idea.pitch = firstSentence(d.text);
   if (d.audience && !String(S.idea.audience || '').trim()) S.idea.audience = d.audience;
   // precio y público: se parte de lo leído en el texto, salvo que la persona ya haya tocado esa sección con el mismo modelo
   if (r.est && (!S.est || !S.est.touched || !S.est.seedKey || S.est.seedKey !== r.est.state.seedKey)) S.est = r.est.state;
-  ui.cards = {}; ui.ready = {}; ui.open = {}; ui.nodes = {}; ui.hl = null; ui.add = false;
+  ui.cards = { real: true }; ui.ready = {}; ui.open = {}; ui.nodes = {}; ui.hl = null; ui.add = false; // los competidores reales se abren solos
   LV.save(); LV.renderChrome();
   if (S.view === 'compite' && $('#fl-out')) {
     paintAll();
@@ -6797,8 +7158,9 @@ function sumHtml(m, M) {
   const tile = (c, l, v, sub, extra, d) => '<div class="ex-k ' + c + '"><span class="ex-kl">' + l + (d ? ' ' + bd(d) : '') + '</span><b class="num">' + v + '</b><small>' + sub + '</small>' + (extra || '') + '</div>';
   const cacTxt = a.verdict === 'ok' ? 'Con anuncios sales a cuenta' : a.verdict === 'warn' ? 'Justo: combina canales gratuitos' : 'Apóyate en canales gratuitos';
   const tiles =
-    tile('mk', 'Mercado total en España', money(k.tamV), k.clients > 0 ? 'Puedes captar ' + (/^</.test(money(k.som)) ? '' : '≈ ') + money(k.som) + ' el primer año' : 'Indica un presupuesto para estimar tu parte', funnelMini(k), k.tam) +
-    tile('co', 'Competencia', nC + (nC === 1 ? ' rival' : ' rivales'), (rv ? 'El mayor: ' + esc(rv.name) + ' (≈ ' + fn(rv.share, rv.share % 1 ? 1 : 0) + ' %)' : 'Sin rivales directos') + ' · hueco: precio ' + esc(M.eco.gap.pl) + ', ' + esc(M.eco.gap.sl), shareMini(M)) +
+    tile('mk', 'Mercado total en España', money(k.tamV), k.clients > 0 ? 'Puedes captar ' + (/^</.test(money(k.som)) ? '' : '≈ ') + money(k.som) + ' el primer año' : (rep.budget === 0 ? 'Con 0 €: solo canales gratuitos; tu parte depende de tu tiempo' : 'Indica un presupuesto para estimar tu parte'), funnelMini(k), k.tam) +
+    (NZ() ? tile('co', 'Competidores reales', NZ().c.length + ' verificados', 'P. ej. ' + NZ().c.slice(0, 2).map((c) => esc(c.n)).join(' y ') + ' · lista con precios más abajo', '<span class="chip ok">' + ic('check', 'sm') + 'Reales</span>')
+      : tile('co', 'Competencia', nC + ' tipos', 'Estimado por sector: busca los reales con un clic más abajo' + ' · hueco: precio ' + esc(M.eco.gap.pl), shareMini(M))) +
     (E ? tile('pr', 'Precio de partida', esc(E.priceTxt), esc(E.priceLabel || E.struct) + (E.band ? ' · el mercado cobra ' + esc(E.band.lo) + ' a ' + esc(E.band.hi) : ''), E.tier ? '<span class="chip acc">' + esc(E.tier.l) + '</span>' : '')
       : tile('pr', 'Precio de partida', '—', 'Abre «Precio y público» para elegir tu modelo', '')) +
     tile('ca', 'Captar un cliente (solo anuncios)', '≈ ' + eur(Math.round(a.cacAds)), 'Máximo sano: ' + eur(a.maxCac) + ' · ' + cacTxt, '<span class="chip ' + a.verdict + '">' + ic(a.verdict === 'ok' ? 'check' : 'alert', 'sm') + (a.verdict === 'ok' ? 'Sale a cuenta' : a.verdict === 'warn' ? 'Justo' : 'Caro') + '</span>', E_('Clic en Google ÷ conversión de la landing ÷ registros que acaban pagando'));
@@ -7239,6 +7601,22 @@ LV.ACT['pl-road'] = function (el) {
 document.addEventListener('toggle', (e) => { const d = e.target; if (d && d.classList && d.classList.contains('ph2')) { if (d.open) ui.open[d.dataset.ph] = true; else delete ui.open[d.dataset.ph]; } }, true);
 
 // ---------- procedencia ----------
+/** Nicho del análisis actual (con competidores reales verificados) o null. */
+function NZ() { return LV.niches ? LV.niches.forRan() : null; }
+function realHtml() {
+  const n = NZ(), r = S.compite.ran || {}, L = LV.niches, SR = L.src;
+  const srcA = (i) => { const x = SR[i]; return x ? '<a class="srcl" href="' + esc(x.u) + '" target="_blank" rel="noopener noreferrer" title="' + esc(x.n) + '">' + esc(x.n.split(' · ')[0] + ', ' + x.y) + ic('ext', 'sm') + '</a>' + (x.comp ? '<small class="mut"> · escrita por un competidor</small>' : '') : '<small class="mut">web oficial</small>'; };
+  const links = L.links((r.name || '') + ' ' + (r.text || ''), n).map((k) => '<a class="chip rl-k" href="' + esc(k.u) + '" target="_blank" rel="noopener noreferrer">' + ic('ext', 'sm') + '<b>' + esc(k.l) + '</b><small>' + esc(k.s) + '</small></a>').join('');
+  const more = '<div class="rl-more"><div class="sub-t">' + (n ? '¿Falta alguno? Búscalo en un clic' : 'Encuentra a tus competidores reales en 10 minutos') + '</div><div class="rl-ks">' + links + '</div>' +
+    (n ? '' : '<ol class="rl-how"><li>Abre <b>Google Play</b> y <b>Google</b>: apunta los 3 a 5 que salgan arriba.</li><li>De cada uno, anota <b>precio</b>, <b>a quién se dirige</b> y <b>qué critican</b> sus reseñas de 1 y 2 estrellas.</li><li>Mira <b>Google Trends</b>: si el interés crece en España, hay demanda viva.</li><li>Tu hueco es lo que repiten las malas reseñas y nadie resuelve.</li></ol>') + '</div>';
+  if (!n) return '<div class="note">' + ic('info') + '<span><b class="fg">Aún no tenemos verificados competidores de tu nicho.</b> Para no inventarte nombres, el apartado «Tipos de alternativa» usa estimaciones del sector. Con las búsquedas de abajo tendrás los reales en minutos.</span></div>' + more;
+  const rows = n.c.map((c) => '<tr><th scope="row"><a class="srcl" href="' + esc(c.u) + '" target="_blank" rel="noopener noreferrer"><b>' + esc(c.n) + '</b>' + ic('ext', 'sm') + '</a>' + (c.find ? '<small class="mut">buscar web</small>' : '') + '</th><td>' + esc(c.what) + '</td><td><b>' + esc(c.model) + '</b>' + (c.price ? '<br><span>' + esc(c.price) + '</span>' : '') + '</td><td>' + (c.price || c.src >= 0 ? srcA(c.src) : '<small class="mut">web oficial</small>') + '</td></tr>').join('');
+  const facts = (n.f || []).map((t, i) => '<li>' + esc(t) + (n.fs && n.fs[i] != null && SR[n.fs[i]] ? ' ' + srcA(n.fs[i]) : '') + '</li>').join('');
+  return '<p class="mut rl-why">Nicho detectado: <b class="fg">' + esc(n.l) + '</b> (por «' + esc((r.det && r.det.niche && r.det.niche.hits ? r.det.niche.hits : []).slice(0, 3).join('», «') || n.l.toLowerCase()) + '»). ¿No es el tuyo? Describe mejor tu idea y vuelve a analizar.</p>' +
+    '<div class="tw"><table class="rl-t"><thead><tr><th scope="col">Competidor</th><th scope="col">Qué ofrece</th><th scope="col">Modelo y precio publicado</th><th scope="col">Fuente</th></tr></thead><tbody>' + rows + '</tbody></table></div>' +
+    (facts ? '<ul class="src-l rl-f">' + facts + '</ul>' : '') +
+    '<p class="fine">Empresas reales consultadas en ' + esc(L.stamp) + '. Los precios cambian: confírmalos en la web de cada una antes de decidir el tuyo. Las cuotas de mercado de estas empresas no son públicas, así que no las estimamos.</p>' + more;
+}
 function srcHtml(M) {
   const sup = M.sup; const rows = Object.keys(sup).map((k) => sup[k]);
   const li = M.prov.sources.map((s) => '<li><a class="srcl" href="' + esc(s.u) + '" target="_blank" rel="noopener noreferrer">' + esc(s.n) + ic('ext', 'sm') + '</a><small>' + esc(s.uses.slice(0, 4).join(' · ')) + '</small></li>').join('');
@@ -7257,8 +7635,11 @@ const CARDS = [
   { id: 'mkt', ico: 'trend', t: 'Mercado real en España',
     head: (M) => 'TAM ' + money(M.market.tamV) + ' · SAM ' + money(M.market.sam) + ' · SOM ' + (M.market.clients > 0 ? money(M.market.som) : '—'),
     tag: (M) => '<span class="chip ' + (M.market.tam.t === 'p' ? 'ok' : 'warn') + '">' + (M.market.tam.t === 'p' ? 'Publicado' : 'Estimado') + '</span>' },
-  { id: 'eco', ico: 'compite', t: 'Competidores y huecos',
-    head: (M) => { const l = M.eco.comps.filter((c) => !c.user); const t = l.slice().sort((a, b) => b.share - a.share)[0]; return l.length + ' competidores' + (t ? ' · el mayor ≈ ' + fn(t.share, t.share % 1 ? 1 : 0) + ' %' : '') + ' · hueco en precio ' + M.eco.gap.pl; } },
+  { id: 'real', ico: 'compite', t: 'Competidores reales',
+    head: () => { const n = NZ(); return n ? n.c.length + ' en ' + n.l.toLowerCase() + ' · ' + n.c.slice(0, 3).map((c) => c.n).join(', ') : 'Tu nicho aún no está verificado: búscalos en 10 minutos'; },
+    tag: () => NZ() ? '<span class="chip ok">Verificados · ' + esc(LV.niches.stamp) + '</span>' : '<span class="chip warn">Por buscar</span>' },
+  { id: 'eco', ico: 'compite', t: 'Tipos de alternativa y huecos',
+    head: (M) => { const l = M.eco.comps.filter((c) => !c.user); return l.length + ' tipos de alternativa (estimado por sector) · hueco en precio ' + M.eco.gap.pl; } },
   { id: 'est', ico: 'euro', t: 'Precio, público y posicionamiento',
     head: () => { const E = estSnap(); return E ? E.model.n + ' · ' + E.priceTxt + (E.tier ? ' · ' + E.tier.l.toLowerCase() : '') : 'Elige tu tipo de negocio y prueba tu precio'; } },
   { id: 'chain', ico: 'alert', t: 'Riesgos y estrategia',
@@ -7356,7 +7737,7 @@ function outHtml() {
   const M = model();
   return sumHtml(m, M) + cardsHtml(M) + footHtmlN();
 }
-const PARTS = { mkt: mktHtml, eco: ecoHtml, chain: chainHtml, plan: planHtml };
+const PARTS = { mkt: mktHtml, eco: ecoHtml, chain: chainHtml, plan: planHtml, real: realHtml };
 function afterPaint() { Object.keys(ui.cards).forEach((id) => { if (ui.cards[id]) fillCard(id); }); requestAnimationFrame(drawLinks); }
 function paintAll() {
   const o = $('#fl-out'); if (!o) return;
@@ -7394,7 +7775,8 @@ function flowText(M, adopted, road, stars) {
   L.push('', '## Búsquedas y anuncios');
   M.kw.forEach((q) => L.push('- «' + q.q + '»: ≈ ' + fn(q.lo) + ' a ' + fn(q.hi) + ' búsquedas al mes [estimado]'));
   L.push('- Clic en Google: ≈ ' + fn(a.cpcG, 2) + ' € [estimado a partir de ' + a.ref.cat + ', ' + fn(a.ref.usd, 2) + ' $]', '- Clic en Meta: ≈ ' + fn(a.cpcM, 2) + ' €', '- Conversión de la landing: ' + fn(a.conv, 1) + ' % [estimado]', '- Coste por registro: ≈ ' + fn(a.cpl, 1) + ' €', '- Coste por cliente solo con anuncios: ≈ ' + eur(Math.round(a.cacAds)) + ' (máximo sano ' + eur(a.maxCac) + ')', '');
-  L.push('## Competidores (cuota ' + M.eco.shareOf + ')');
+  { const n = NZ(); if (n) { L.push('## Competidores reales (' + n.l + ', consulta de ' + LV.niches.stamp + ')'); n.c.forEach((c) => { const sr = LV.niches.src[c.src]; L.push('- ' + c.n + ' (' + c.u + '): ' + c.what + ' Modelo: ' + c.model + (c.price ? '; ' + c.price : '') + (sr ? ' [fuente: ' + sr.n + ', ' + sr.y + ']' : '')); }); L.push(''); } }
+  L.push('## Tipos de alternativa (estimado por sector; cuota ' + M.eco.shareOf + ')');
   M.eco.comps.forEach((c) => L.push('- ' + c.name + ' (' + c.kind.toLowerCase() + '): ≈ ' + fn(c.share, c.share % 1 ? 1 : 0) + ' % ' + tag(c.cuota) + '; precio: ' + c.precio.txt + '. Flojea en: ' + (c.debil.join('; ') || 's. d.') + '. Cómo aprovecharlo: ' + (c.ataque.join('; ') || 's. d.')));
   L.push('- Tu hueco: precio ' + M.eco.gap.pl + ' y personalización ' + M.eco.gap.sl, '');
   if (S.est && S.est.touched && window.ValidEst) L.push(window.ValidEst.summaryText(S.est, { name: () => S.idea.name || '' }).replace(/^(#+) /gm, '#$1 '), '');
@@ -9644,7 +10026,7 @@ function confirm() {
     if (!fast) { app.classList.add('enter'); setTimeout(() => app.classList.remove('enter'), 900); }
     root.classList.add('go');
     const b = $('#hd-model'); if (b && !fast) { b.classList.remove('pulse'); void b.offsetWidth; b.classList.add('pulse'); }
-    LV.toast('Modelo activo: ' + label(), 'check');
+    if (!first) LV.toast('Modelo activo: ' + label(), 'check'); // la primera vez ya lo dice la cabecera del Centro
     setTimeout(() => { close(false); busy = false; const t = $('#hd-title'); if (t) { t.setAttribute('tabindex', '-1'); try { t.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } } }, fast ? 0 : 470);
   };
   if (fast) run(); else requestAnimationFrame(() => requestAnimationFrame(run));
@@ -10089,7 +10471,7 @@ function close(done) {
 function finish() {
   if (busy) return; busy = true; readInputs(); commit(false);
   if (LV.rt) LV.rt.ensure(true);
-  LV.toast(mode === 'edit' ? 'Perfil guardado' : (d.name ? 'Un placer, ' + firstOf(d.name) : 'Perfil guardado'), 'check');
+  if (mode === 'edit') LV.toast('Perfil guardado', 'check'); // la primera vez saluda Astro: sin aviso extra encima
   if (LV.agent && LV.agent.onboarded) { try { LV.agent.onboarded(mode); } catch (e) { /* sin asistente */ } }
   close(true);
 }
@@ -10735,7 +11117,7 @@ const rnd = (a, b) => a + Math.random() * (b - a);
 const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
 const isNarrow = () => window.innerWidth < 700;
 const L = {}; AX.life = L;
-const CFG = { fx: true, wander: true, lean: true, sleep: true, sleepMs: 28000, paused: false };
+const CFG = { fx: true, wander: true, lean: true, sleep: true, sleepMs: isNarrow() ? 6000 : 28000, paused: false }; // en el móvil se recoge pronto en una estrella para no tapar el contenido
 let fab = null, pres = null, presV = null, fabV = null, ready = false;
 
 // ---------- polvo estelar ----------
@@ -12074,7 +12456,9 @@ function build(raw, F) {
     geo: F.fn(k.geo * 100, k.geo < 0.1 ? 1 : 0), seg: F.fn(k.seg * 100, k.seg < 0.1 ? 1 : 0), tamShare: pc1(k.tamShare), samShare: pc1(k.samShare),
     grow: k.grow ? k.grow.v : null, growPub: !!(k.grow && k.grow.t === 'p'),
     sat: rep.market.sat, satL: (rep.market.satL || {}).l || '', unserved: rep.market.unserved,
-    nC: comps.length, comps: comps.slice(0, 5).map((c) => ({ name: c.name, kind: c.kind, share: c.share })), top3: sum(comps.slice(0, 3).map((c) => c.share)), shareOf: eco.shareOf, rest: eco.rest, gap: eco.gap,
+    real: (LV.niches && LV.niches.forRan()) ? LV.niches.forRan().c.map((c) => c.n) : null,
+    realLabel: (LV.niches && LV.niches.forRan()) ? LV.niches.forRan().l : '',
+    nC: (LV.niches && LV.niches.forRan()) ? LV.niches.forRan().c.length : comps.length, comps: comps.slice(0, 5).map((c) => ({ name: c.name, kind: c.kind, share: c.share })), top3: sum(comps.slice(0, 3).map((c) => c.share)), shareOf: eco.shareOf, rest: eco.rest, gap: eco.gap,
     price: est ? { txt: est.priceTxt, label: est.priceLabel || est.struct, lo: est.band && est.band.lo, hi: est.band && est.band.hi, tier: est.tier || null, struct: est.struct, model: est.model && est.model.n, score: est.score, verdict: est.verdict, be: est.be, pay: est.pay, profit12: est.profit12 } : null,
     ads: { cacAds: Math.round(a.cacAds), cacLo: Math.round(a.cacLo), maxCac: a.maxCac, verdict: a.verdict, cpcG: F.fn(a.cpcG, 2), cpcM: F.fn(a.cpcM, 2), conv: F.fn(a.conv, 1), cpl: F.fn(a.cpl, 1), leadCust: Math.round(a.leadCust) },
     econ: { be: e.be, reach: e.reach, ratio: e.reachRatio, ltv: e.ltv, cac: e.cac, v: e.v, runway: e.runway, mg: e.mg, unit: e.unit, life: e.life },
@@ -12620,7 +13004,7 @@ function welcome(back) {
 function intro() {
   if (!has()) return '';
   const i = info(), pl = profileLine();
-  return J(pl ? 'Con lo que me has contado (' + pl + ') ' + (i ? 'te he preparado una **ruta de ≈ ' + i.R.nWeeks + ' semanas** que cabe en tu tiempo.' : 'adapto el ritmo a tu situación.') : '', i ? 'La verás en el Centro de control, en «Tu ruta», en cuanto elijas tu modelo.' : '');
+  return J(pl ? 'Con lo que me has contado (' + pl + ') ' + (i && LV.state.mdl && LV.state.mdl.id ? 'te he preparado una **ruta de ≈ ' + i.R.nWeeks + ' semanas** que cabe en tu tiempo.' : 'te preparo una ruta que cabe en tu tiempo; en cuanto elijas tu modelo te digo cuántas semanas son.') : '', i ? 'La verás en el Centro de control, en «Tu ruta», en cuanto elijas tu modelo.' : '');
 }
 function line() { return profileLine(); }
 
@@ -13518,6 +13902,7 @@ def('comp', ['competenc*', 3.5, 'competidor*', 3.5, 'rival*', 3.5, 'diferenci*',
 });
 def('compworry', [/(competenc\w*|competidor\w*|rival\w*|gigantes?|grandes empresas|amazon|google).{0,40}(fuert\w*|dur\w*|grande\w*|much\w*|agresiv\w*|enorm\w*|imposible|asust\w*|preocup\w*|dominan|copi\w*|ganan)/, 9, /(ya existe|ya hay (algo|alguien|muchos)|alguien (ya )?lo hace|me (van a|pueden) copiar|no puedo competir|como (le )?gano|como compito|como competir|tengo mucha competencia|hay mucha competencia)/, 8], (E) => {
   const D = E.ran ? digest() : null; const lead = '**Que haya competencia es buena señal:** hay clientes dispuestos a pagar. Lo que importa es dónde flojean y qué haces distinto.';
+  if (D && D.real && D.real.length) return { t: J(lead, '**En tu nicho (' + lc(D.realLabel) + ')** hay competidores reales y verificados: ' + D.real.slice(0, 4).map((n) => '**' + n + '**').join(', ') + (D.real.length > 4 ? ' y ' + (D.real.length - 4) + ' más' : '') + '.', 'Ábrelos en **«Competidores reales»**: verás qué ofrece cada uno, cuánto cobra y dónde puedes ganarles. No me invento cuotas de mercado: compáralos tú en precio, a quién atienden y qué prometen.'), acts: E.v === 'compite' ? [] : [ac('Ver mis competidores', 'compite')], qr: [Q.comp, Q.val, Q.chan], id: 'compworry' };
   if (D && D.nC) {
     const r = D.comps[0];
     return { t: J(lead, '**En tu análisis:** ' + D.nC + (D.nC === 1 ? ' rival' : ' rivales') + '. El mayor, ' + r.name + ', pesa ≈ ' + D.F.fn(r.share, r.share % 1 ? 1 : 0) + ' %; los 3 primeros suman ≈ ' + D.F.fn(D.top3, 0) + ' %' + (D.top3 >= 50 ? ' (mercado concentrado: entra por un nicho).' : ' (queda sitio).'), 'Tu hueco: precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**.', B(kb(E).comp), '**Siguiente paso:** elige **un** cliente y **una** ventaja que se vea.'), acts: [ac('Ver competidores', { nav: 'eco' })].concat(E.v === 'compite' ? [] : [ac('Abrir Compite', 'compite')]), qr: [Q.price, Q.risks, Q.first], id: 'compworry' };
@@ -13620,7 +14005,7 @@ function tldr(id, D) {
   const r = D.comps[0], a = D.ads;
   switch (id) {
     case 'market': return 'Hay mucho dinero en juego (**' + D.tam + '**), pero tu parte realista es **' + D.som + '**. Ese segundo número es el que cuenta.';
-    case 'comp': return r ? 'Hay **' + D.nC + '** rivales; el mayor tiene ≈ ' + D.F.fn(r.share, r.share % 1 ? 1 : 0) + ' %. ' + (D.top3 >= 50 ? 'Está concentrado: entra por un nicho concreto.' : 'Queda sitio si ofreces algo distinto.') : 'No hay rivales directos en el mapa.';
+    case 'comp': if (D.real && D.real.length) return 'Tienes **' + D.real.length + ' competidores reales** en tu nicho, como ' + D.real.slice(0, 3).join(', ') + '. Mira en qué flojea cada uno: ahí está tu hueco.'; return r ? 'Hay **' + D.nC + '** rivales; el mayor tiene ≈ ' + D.F.fn(r.share, r.share % 1 ? 1 : 0) + ' %. ' + (D.top3 >= 50 ? 'Está concentrado: entra por un nicho concreto.' : 'Queda sitio si ofreces algo distinto.') : 'No hay rivales directos en el mapa.';
     case 'price': return D.price ? 'Tu precio es **' + D.price.txt + '** y el mercado cobra de ' + D.price.lo + ' a ' + D.price.hi + '. Si estás dentro, vas bien; fuera, justifícalo.' : '';
     case 'ads': return 'Un cliente con anuncios cuesta ≈ **' + D.F.eur(a.cacAds) + '** y lo sano es **' + D.F.eur(a.maxCac) + '** o menos. ' + (a.cacAds > a.maxCac ? 'Como cuesta más de lo sano, empieza por canales gratuitos.' : 'Sale a cuenta, pero mídelo.');
     case 'risk': return D.risks.length ? 'Tu mayor riesgo es **' + D.risks[0].title + '**. Resuélvelo antes de gastar dinero.' : '';
@@ -14375,7 +14760,7 @@ function presData0(E) {
       if (E.sub === 'plan') return { k: 'Plan de acción', t: 'Tu ruta por fases', what: 'Fases y hitos con semanas orientativas para llegar a tus primeros clientes.', todo: 'Marca los hitos al completarlos para seguir tu avance.', st: D && D.plan ? 'Son **' + D.plan.ms + ' hitos** en unas **' + D.plan.weeks + ' semanas** (orientativo).' : '', short: 'Fases y hitos con semanas orientativas.' };
       if (E.sub === 'mercado') return { k: 'Análisis de competencia', t: 'El tamaño de tu mercado', what: 'TAM, SAM y SOM: el mercado total, el atendible y la parte que puedes captar.', todo: 'Mira el SOM: es lo que podrías captar de verdad este año.', st: D ? 'Tu parte realista (SOM): ≈ **' + D.som + '**.' : '', short: 'Cuánto dinero hay en juego y qué parte es tuya.' };
       if (E.sub === 'datos') return { k: 'Análisis de competencia', t: 'De dónde salen las cifras', what: 'Cada dato indica si es publicado, estimado o tuyo, y su fuente.', todo: 'Contrasta las estimaciones con clientes reales en Valida.', st: D ? 'De **' + (D.prov.p + D.prov.e) + ' cifras**, ' + D.prov.p + ' son publicadas y ' + D.prov.e + ' estimadas.' : '', short: 'Cada cifra indica si es publicada o estimada.' };
-      if (E.ran) return { k: 'Análisis de competencia', t: 'Tu informe está listo', what: 'Mercado (TAM, SAM, SOM), competidores, precio y público, riesgos y plan de acción de tu idea.', todo: 'Ábrelo por tarjetas o pulsa **«Explicar estos datos de forma sencilla»** y te lo resumo.', st: D ? 'Viabilidad **' + D.viab + '/100** (' + lc(D.band.l) + ') · **' + D.nC + ' rivales** · captarías ≈ **' + D.clients + ' clientes**.' : '', short: 'Tu informe de mercado, rivales, precio, riesgos y plan.' };
+      if (E.ran) return { k: 'Análisis de competencia', t: 'Tu informe está listo', what: 'Mercado (TAM, SAM, SOM), competidores, precio y público, riesgos y plan de acción de tu idea.', todo: 'Ábrelo por tarjetas o pulsa **«Explicar estos datos de forma sencilla»** y te lo resumo.', st: D ? 'Viabilidad **' + D.viab + '/100** (' + lc(D.band.l) + ') · **' + D.nC + (D.real ? ' competidores reales' : ' rivales') + '**' + (D.budget === 0 ? ' · con 0 € tus primeros clientes llegarán por canales gratuitos.' : ' · captarías ≈ **' + D.clients + ' clientes**.') : '', short: 'Tu informe de mercado, rivales, precio, riesgos y plan.' };
       return { k: 'Análisis de competencia', t: 'Convierte tu idea en un informe', what: 'Con tu descripción calculo mercado (TAM, SAM, SOM), rivales, precio, riesgos y un plan.', todo: 'Cuéntame qué vendes, a quién, cuánto cobrarías y con qué presupuesto. Luego pulsa «Analizar».', st: st.idea ? 'Tienes un **borrador de idea**: puedo ponerlo aquí por ti.' : '', short: 'Describe tu idea y genero mercado, rivales, precio y plan.' };
     }
     case 'lanza': {
@@ -14431,7 +14816,8 @@ function fabRect() {
 /** Figura de Astro a tamaño grande con bocadillo: sale volando de su botón, se forma su rostro, presenta el apartado y vuelve sola. */
 function presOn(E, force) {
   if (!st.ready || st.open || ((st.nopres || st.away) && !force) || root.classList.contains('ax-drag')) return;
-  E = E || env(); const P = presData(E), k = presKey(E), n = st.ps[k] || 0, rep = E.v === 'compite' && E.ran && !E.sub, full = !!force || (n < 1 && !rep);
+  E = E || env(); if (!force && E.v === 'modelo' && window.innerWidth < 700) return; // en el móvil la elección de modelo se ve limpia
+  const P = presData(E), k = presKey(E), n = st.ps[k] || 0, rep = E.v === 'compite' && E.ran && !E.sub, full = !!force || (n < 1 && !rep);
   st.ps[k] = n + 1; persist();
   hideTease(); clearTimeout(st.pT);
   const live = !pres.hidden && pres.classList.contains('on') && !pres.classList.contains('leaving'); // la figura ya estaba en pantalla: se traslada al nuevo apartado
@@ -14614,6 +15000,7 @@ function showTease(html, immediate) {
   clearTimeout(st.showT); clearTimeout(st.teaseT);
   const go = () => {
     if (st.open || st.mute || st.away || intro.on) return;
+    if (window.innerWidth < 700 && (view() === 'modelo' || (pres && !pres.hidden))) return; // en el móvil, nada de burbujas encima de otra ventana de Astro
     if (life && life.form === 'orb') life.wake('tease');
     hidePres(true);
     tz.innerHTML = inl(html);
@@ -14875,9 +15262,9 @@ function ready() {
   // primera vez: siempre se despliega; después, solo si la persona no lo ha desactivado y la pantalla es ancha (en móvil la hoja taparía la app)
   const first = !st.wel, auto = !first && !st.noAuto && !isSheet();
   if (!reduced()) { root.dataset.arrive = '1'; setTimeout(() => { delete root.dataset.arrive; }, 1600); } // el avatar entra con un destello al terminar el splash
-  if (first) { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); const go = () => setTimeout(() => introStart(false), reduced() ? 200 : 900); if (LV.me && LV.me.active()) LV.me.after(go); else go(); } // primera visita: Astro vuela a la pantalla, da la bienvenida y presenta ValidLance
+  if (first) { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); const go = () => { const pf = LV.me && (LV.me.done() || !!(LV.me.get() || {}).skip); if (pf) { st.wel = 1; introChat(env()); persist(); return; } setTimeout(() => introStart(false), reduced() ? 200 : 900); }; if (LV.me && LV.me.active()) LV.me.after(go); else go(); } // tras el perfil no hay recorrido encima: el saludo queda en el chat // primera visita: Astro vuela a la pantalla, da la bienvenida y presenta ValidLance
   else if (auto) { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); setTimeout(autoOpen, reduced() ? 200 : 750); }
-  else { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); setTimeout(() => presOn(env()), reduced() ? 150 : 1150); } // sin despliegue automático: Astro entra y presenta el apartado actual
+  else { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); if (window.innerWidth >= 700) setTimeout(() => presOn(env()), reduced() ? 150 : 1150); } // sin despliegue automático: en ordenador Astro presenta el apartado; en el móvil, quien vuelve entra sin ventanas
 }
 /** La persona termina (o se salta) la bienvenida de Astro: how = first · edit · skip. */
 function onboarded(how) {
@@ -15570,6 +15957,8 @@ fit();
 if (!RM && ctx) raf = requestAnimationFrame(loop);
 try { btn.focus({ preventScroll: true, focusVisible: false }); } catch (e) { /* sin foco */ }
 
+// quien ya vio la bienvenida entra directo: la pantalla de inicio solo se ve la primera vez
+try { if (localStorage.getItem('lv_splash_welcome_v1') === '1') setTimeout(() => { if (state === 'idle') skip(); }, 0); } catch (e) { /* sin almacenamiento */ }
 LV.splash = { go: function (x, y) { const c = center(); go(x == null ? c[0] : x, y == null ? c[1] : y); }, skip: skip, hooks: hooks, get state() { return state; } };
 })();
 
@@ -15599,7 +15988,7 @@ const PHRASE = '¡Bienvenido a ValidLance, donde te ayudaremos a que tu proyecto
 const NAME = 'Astro';
 // fullBody: false (por defecto) → Astro es su busto con traje (como en el panel): aparece en el centro exacto de la pantalla, sin cuerpo entero y sin caminata (appear = ms que tarda en materializarse);
 //           true → versión de cuerpo entero que entra andando (walkMin/walkMax) · walkMin/walkMax: duración (ms) de la entrada andando (se ajusta a la distancia) · hold: pausa con la frase ya completa · exit: salida · autoContinue: ms tras la salida para abrir el panel solo (0 = espera al botón)
-const CFG = { start: 800, walkMin: 2800, walkMax: 4800, word: 135, hold: 1900, exit: 1500, autoContinue: 0, once: false, fullBody: false, appear: 1500 }; // once: true → solo la primera vez que se abre la app
+const CFG = { start: 300, walkMin: 2800, walkMax: 4800, word: 95, hold: 800, exit: 900, autoContinue: 0, once: true, fullBody: false, appear: 1100 }; // once: true → solo la primera vez que se abre la app
 // marcha: cycle = segundos por ciclo completo (dos pasos) · amp = grados de zancada a velocidad plena · knee = flexión máxima de la rodilla al adelantar la pierna · lift = leve subida de la cadera en el paso · arm = balanceo del brazo · bob = rebote del torso · sway = vaivén lateral (unidades del viewBox 120 × 310)
 const GAIT = { cycle: 0.8, amp: 12, knee: 17, lift: 1.4, arm: 8.5, bob: 1.5, sway: 0.5, leg: 110 };
 const KEY = 'lv_splash_welcome_v1';
