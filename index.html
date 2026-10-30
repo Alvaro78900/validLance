@@ -1,11 +1,21 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="description" content="Panel de control de ValidLance: valida, compite, lanza y genera tu idea de negocio.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%230b0406'/%3E%3Cpath d='M12 16h13l7 22 7-22h13L38 50H26z' fill='%23c41e3a'/%3E%3C/svg%3E">
 <title>ValidLance</title>
+<meta property="og:type" content="website">
+<meta property="og:locale" content="es_ES">
+<meta property="og:site_name" content="ValidLance">
+<meta property="og:title" content="ValidLance · Valida tu idea antes de gastar un euro">
+<meta property="og:description" content="Competencia, precios, landing y Astro, tu mentor con IA. Gratis y sin registro.">
+<meta property="og:url" content="https://alvaro78900.github.io/validLance/">
+<meta property="og:image" content="https://alvaro78900.github.io/validLance/og.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
 <meta name="theme-color" content="#0b0406">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -15,6 +25,7 @@
 <body>
 
 <svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-hub" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2.8"/><circle cx="12" cy="4.4" r="1.9"/><circle cx="19.6" cy="12" r="1.9"/><circle cx="12" cy="19.6" r="1.9"/><circle cx="4.4" cy="12" r="1.9"/><path d="M12 6.3v2.9M17.7 12h-2.9M12 17.7v-2.9M6.3 12h2.9"/></symbol>
 <symbol id="i-home" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9" rx="1.6"/><rect x="14" y="3" width="7" height="5" rx="1.6"/><rect x="14" y="12" width="7" height="9" rx="1.6"/><rect x="3" y="16" width="7" height="5" rx="1.6"/></symbol>
 <symbol id="i-valida" viewBox="0 0 24 24"><path d="M12 3l7 3v5c0 4.5-3 8.2-7 10-4-1.8-7-5.5-7-10V6l7-3z"/><path d="M8.5 12l2.5 2.5 4.5-5"/></symbol>
 <symbol id="i-compite" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4.5"/><path d="M12 1.5v4M12 18.5v4M1.5 12h4M18.5 12h4"/></symbol>
@@ -36,6 +47,7 @@
 <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M19 7h1M4 17h1M11 17h9"/><circle cx="16" cy="7" r="2.2"/><circle cx="8" cy="17" r="2.2"/></symbol>
 <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7l1-8z"/></symbol>
 <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1L3.2 9.5l6.1-.9z"/></symbol>
+<symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M17 6l3 3M14 9l2 2"/></symbol>
 <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></symbol>
 <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
 <symbol id="i-euro" viewBox="0 0 24 24"><path d="M18 7a6 6 0 1 0 0 10M4 10h9M4 14h9"/></symbol>
@@ -118,6 +130,13 @@
 </g>
 </symbol>
 <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19.5V5M5.8 11.2L12 5l6.2 6.2"/></symbol>
+<symbol id="i-people" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.4"/><path d="M2.8 20c0-3.6 2.8-6 6.2-6s6.2 2.4 6.2 6"/><circle cx="17.2" cy="9" r="2.6"/><path d="M16.6 14.2c2.8.3 4.6 2.4 4.6 5.4"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="M15.5 15.5L21 21"/></symbol>
+<symbol id="i-msg" viewBox="0 0 24 24"><path d="M4 5h16v11H9l-5 4V5z"/><path d="M8 9.5h8M8 12.5h5"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3A4 4 0 0 0 11 18.7l1-1"/></symbol>
+<symbol id="i-agents" viewBox="0 0 24 24"><circle cx="5.5" cy="17.5" r="1.9"/><circle cx="11.5" cy="6.5" r="2.3"/><circle cx="18.5" cy="14.5" r="1.9"/><path d="M6.7 15.8l3.7-7M13.6 8.2l3.7 5"/></symbol>
+<symbol id="i-route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="5" r="2.2"/><path d="M8.2 19H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.8"/></symbol>
+<symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.2"/></symbol>
 </defs></svg>
 
 <div class="splash" id="splash" role="dialog" aria-modal="true" aria-labelledby="sp-name" aria-describedby="sp-tag">
@@ -251,8 +270,58 @@
     <canvas class="sp-fx" id="sp-fx" aria-hidden="true"></canvas>
     <i class="sp-beacon" id="sp-beacon" aria-hidden="true"><b></b></i>
     <div class="sp-fig" id="sp-fig" aria-hidden="true">
-      <i class="sp-halo"></i>
-      <span class="sp-av"><span class="ax" data-ax="pres" data-vb="0 0 120" data-tone="dark"><span class="ax-badge"><svg class="ax-sv" viewBox="0 0 120 120" aria-hidden="true" focusable="false"><use href="#ax-body"></use></svg></span><canvas class="ax-cv" aria-hidden="true"></canvas></span></span>
+      <i class="sp-halo"></i><i class="sp-ground"></i>
+      <span class="sp-av"><svg class="sp-body" viewBox="0 0 120 310" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+<defs>
+<radialGradient id="axf-hd" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#14040a" stop-opacity=".92"/><stop offset=".6" stop-color="#14040a" stop-opacity=".6"/><stop offset="1" stop-color="#14040a" stop-opacity="0"/></radialGradient>
+<radialGradient id="axf-nk" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#ff8097" stop-opacity=".5"/><stop offset=".55" stop-color="#e8486a" stop-opacity=".14"/><stop offset="1" stop-color="#e8486a" stop-opacity="0"/></radialGradient>
+<linearGradient id="axc-g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#36264f"/><stop offset=".5" stop-color="#1a0d22"/><stop offset="1" stop-color="#0a050d"/></linearGradient>
+<linearGradient id="axc-gr" x1="1" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#58203a"/><stop offset=".5" stop-color="#220c1c"/><stop offset="1" stop-color="#0a050d"/></linearGradient>
+<radialGradient id="axc-neb" cx="50%" cy="34%" r="62%"><stop offset="0" stop-color="#c41e3a" stop-opacity=".5"/><stop offset=".55" stop-color="#800020" stop-opacity=".18"/><stop offset="1" stop-color="#800020" stop-opacity="0"/></radialGradient>
+<radialGradient id="axc-neb2" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#6a4bd0" stop-opacity=".4"/><stop offset="1" stop-color="#2a1a66" stop-opacity="0"/></radialGradient>
+<radialGradient id="axc-nd" cx="50%" cy="50%" r="50%"><stop offset="0" stop-color="#fff" stop-opacity=".95"/><stop offset=".28" stop-color="#ffb3c0" stop-opacity=".55"/><stop offset="1" stop-color="#ff8097" stop-opacity="0"/></radialGradient>
+<linearGradient id="axc-neck" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2a1630" stop-opacity="0"/><stop offset=".6" stop-color="#3a1a3c" stop-opacity=".9"/><stop offset="1" stop-color="#2a1230"/></linearGradient>
+<pattern id="axc-st" width="11" height="11" patternUnits="userSpaceOnUse" patternTransform="rotate(12)"><path d="M3 .9l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5L1 2.9l1.5-.5z" fill="#ffd9e0" opacity=".75"/><circle cx="8.2" cy="2.4" r=".38" fill="#fff" opacity=".85"/><circle cx="5.2" cy="8" r=".32" fill="#ff8097" opacity=".85"/><circle cx="9.6" cy="8.6" r=".28" fill="#fff" opacity=".6"/><circle cx="1.6" cy="9" r=".26" fill="#cfd4ff" opacity=".7"/></pattern>
+<clipPath id="axf-cu"><rect x="0" y="150" width="120" height="86.6"/></clipPath>
+<clipPath id="axf-cl"><rect x="0" y="235.4" width="120" height="90"/></clipPath>
+</defs>
+<ellipse cx="60" cy="42" rx="36" ry="38" fill="url(#axf-hd)"/>
+<g class="fb-body"><path d="M38 176 Q42 210 60 212 Q78 210 82 176 Z" fill="#10081a"/></g>
+<g class="fb-lL"><g clip-path="url(#axf-cu)"><path d="M38 184 Q36.4 232 41.4 277 L56.2 277 Q60.4 232 60.6 184 Z" fill="url(#axc-g)"/><path d="M38 184 Q36.4 232 41.4 277 L56.2 277 Q60.4 232 60.6 184 Z" fill="url(#axc-st)" opacity="0.8"/><path d="M38 184 Q36.4 232 41.4 277" fill="none" stroke="#cfd4ff" stroke-opacity=".3" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round"/><path d="M47.4 188.0 L49.2 212.0 L47.8 236.0 L49.2 258.0 L48.4 276.0" fill="none" stroke="#ffd0da" stroke-opacity=".55" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="47.4" cy="188.0" r="4.4" fill="url(#axc-nd)"/><circle cx="47.4" cy="188.0" r="1.00" fill="#fff"/><circle cx="47.8" cy="236.0" r="6.2" fill="url(#axc-nd)"/><circle cx="47.8" cy="236.0" r="1.40" fill="#fff"/></g><g class="fb-sL"><g clip-path="url(#axf-cl)"><path d="M38 184 Q36.4 232 41.4 277 L56.2 277 Q60.4 232 60.6 184 Z" fill="url(#axc-g)"/><path d="M38 184 Q36.4 232 41.4 277 L56.2 277 Q60.4 232 60.6 184 Z" fill="url(#axc-st)" opacity="0.8"/><path d="M38 184 Q36.4 232 41.4 277" fill="none" stroke="#cfd4ff" stroke-opacity=".3" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round"/><path d="M47.4 188.0 L49.2 212.0 L47.8 236.0 L49.2 258.0 L48.4 276.0" fill="none" stroke="#ffd0da" stroke-opacity=".55" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="48.4" cy="276.0" r="4.8" fill="url(#axc-nd)"/><circle cx="48.4" cy="276.0" r="1.10" fill="#fff"/></g><circle cx="47.8" cy="236" r="8.2" fill="url(#axc-g)"/><circle cx="47.8" cy="236.0" r="6.2" fill="url(#axc-nd)"/><circle cx="47.8" cy="236.0" r="1.40" fill="#fff"/><path d="M40.4 277 L56.2 277 Q57.8 285 57.2 291 Q56.2 298 50.2 298.8 L46.2 299.2 Q40.6 299 40 291.6 Q39.8 284 40.4 277 Z" fill="url(#axc-g)"/><path d="M40.4 277 L56.2 277 Q57.8 285 57.2 291 Q56.2 298 50.2 298.8 L46.2 299.2 Q40.6 299 40 291.6 Q39.8 284 40.4 277 Z" fill="url(#axc-st)" opacity="0.7"/><path d="M40.6 296.6 Q46.8 299.8 57.4 296.4" fill="none" stroke="#000" stroke-opacity=".55" stroke-width="1.1" stroke-linecap="round"/><path d="M42 288.6 Q47.6 285.4 54.8 288.4" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width=".8" stroke-linecap="round"/><circle cx="48.4" cy="292.8" r="4.4" fill="url(#axc-nd)"/><circle cx="48.4" cy="292.8" r="1.00" fill="#fff"/></g></g>
+<g class="fb-lR"><g clip-path="url(#axf-cu)"><path d="M82 184Q 83.6 232 78.6 277L 63.8 277Q 59.6 232 59.4 184Z" fill="url(#axc-gr)"/><path d="M82 184Q 83.6 232 78.6 277L 63.8 277Q 59.6 232 59.4 184Z" fill="url(#axc-st)" opacity="0.8"/><path d="M82 184Q 83.6 232 78.6 277" fill="none" stroke="#ff8097" stroke-opacity=".6" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round"/><path d="M72.6 188.0 L70.8 212.0 L72.2 236.0 L70.8 258.0 L71.6 276.0" fill="none" stroke="#ffd0da" stroke-opacity=".55" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="72.6" cy="188.0" r="4.4" fill="url(#axc-nd)"/><circle cx="72.6" cy="188.0" r="1.00" fill="#fff"/><circle cx="72.2" cy="236.0" r="6.2" fill="url(#axc-nd)"/><circle cx="72.2" cy="236.0" r="1.40" fill="#fff"/></g><g class="fb-sR"><g clip-path="url(#axf-cl)"><path d="M82 184Q 83.6 232 78.6 277L 63.8 277Q 59.6 232 59.4 184Z" fill="url(#axc-gr)"/><path d="M82 184Q 83.6 232 78.6 277L 63.8 277Q 59.6 232 59.4 184Z" fill="url(#axc-st)" opacity="0.8"/><path d="M82 184Q 83.6 232 78.6 277" fill="none" stroke="#ff8097" stroke-opacity=".6" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round"/><path d="M72.6 188.0 L70.8 212.0 L72.2 236.0 L70.8 258.0 L71.6 276.0" fill="none" stroke="#ffd0da" stroke-opacity=".55" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="71.6" cy="276.0" r="4.8" fill="url(#axc-nd)"/><circle cx="71.6" cy="276.0" r="1.10" fill="#fff"/></g><circle cx="72.2" cy="236" r="8.2" fill="url(#axc-gr)"/><circle cx="72.2" cy="236.0" r="6.2" fill="url(#axc-nd)"/><circle cx="72.2" cy="236.0" r="1.40" fill="#fff"/><path d="M79.6 277L 63.8 277Q 62.2 285 62.8 291Q 63.8 298 69.8 298.8L 73.8 299.2Q 79.4 299 80 291.6Q 80.2 284 79.6 277Z" fill="url(#axc-gr)"/><path d="M79.6 277L 63.8 277Q 62.2 285 62.8 291Q 63.8 298 69.8 298.8L 73.8 299.2Q 79.4 299 80 291.6Q 80.2 284 79.6 277Z" fill="url(#axc-st)" opacity="0.7"/><path d="M79.4 296.6Q 73.2 299.8 62.6 296.4" fill="none" stroke="#000" stroke-opacity=".55" stroke-width="1.1" stroke-linecap="round"/><path d="M78 288.6Q 72.4 285.4 65.2 288.4" fill="none" stroke="#fff" stroke-opacity=".3" stroke-width=".8" stroke-linecap="round"/><circle cx="71.6" cy="292.8" r="4.4" fill="url(#axc-nd)"/><circle cx="71.6" cy="292.8" r="1.00" fill="#fff"/></g></g>
+<g class="fb-body">
+<path d="M53.6 63 L66.4 63 L67.4 84 Q60 89 52.6 84 Z" fill="url(#axc-neck)"/><path d="M53.6 63 L66.4 63 L67.4 84 Q60 89 52.6 84 Z" fill="url(#axc-st)" opacity=".6"/>
+<path d="M46 79 Q35.6 82.4 31.6 90.4 Q30.2 98 32.6 118 Q36 138 39.6 156 Q38.4 172 38 186 Q42 200 60 203 Q78 200 82 186 Q81.6 172 80.4 156 Q84 138 87.4 118 Q89.8 98 88.4 90.4 Q84.4 82.4 74 79 Q67 76.4 60 76.4 Q53 76.4 46 79 Z" fill="url(#axc-g)"/>
+<path d="M46 79 Q35.6 82.4 31.6 90.4 Q30.2 98 32.6 118 Q36 138 39.6 156 Q38.4 172 38 186 Q42 200 60 203 Q78 200 82 186 Q81.6 172 80.4 156 Q84 138 87.4 118 Q89.8 98 88.4 90.4 Q84.4 82.4 74 79 Q67 76.4 60 76.4 Q53 76.4 46 79 Z" fill="url(#axc-st)" opacity=".8"/>
+<path d="M46 79 Q35.6 82.4 31.6 90.4 Q30.2 98 32.6 118 Q36 138 39.6 156 Q38.4 172 38 186 Q42 200 60 203 Q78 200 82 186 Q81.6 172 80.4 156 Q84 138 87.4 118 Q89.8 98 88.4 90.4 Q84.4 82.4 74 79 Q67 76.4 60 76.4 Q53 76.4 46 79 Z" fill="url(#axc-neb)"/>
+<ellipse cx="86" cy="150" rx="22" ry="34" fill="url(#axc-neb2)"/>
+<path d="M45 80 Q60 91 75 80" fill="none" stroke="#ff8097" stroke-opacity=".45" stroke-width=".8" stroke-linecap="round"/>
+<path d="M46 79 Q35.6 82.4 31.6 90.4 Q30.2 98 32.6 118 Q36 138 39.6 156 Q38.4 172 38 186" fill="none" stroke="#cfd4ff" stroke-opacity=".34" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M74 79Q 84.4 82.4 88.4 90.4Q 89.8 98 87.4 118Q 84 138 80.4 156Q 81.6 172 82 186" fill="none" stroke="#ff8097" stroke-opacity=".62" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M38 186 Q42 200 60 203" fill="none" stroke="#cfd4ff" stroke-opacity=".22" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M82 186Q 78 200 60 203" fill="none" stroke="#ff8097" stroke-opacity=".5" stroke-width=".9" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M36.0 94.0 L47.0 88.0 L60.0 96.0 L73.0 88.0 L84.0 94.0" fill="none" stroke="#ffd0da" stroke-opacity=".5" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M60.0 96.0 L60.0 118.0 L60.0 148.0 L60.0 184.0" fill="none" stroke="#ffd0da" stroke-opacity=".5" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M60.0 118.0 L47.0 128.0 L46.0 162.0 L60.0 184.0" fill="none" stroke="#ffd0da" stroke-opacity=".5" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M60.0 118.0 L73.0 128.0 L74.0 162.0 L60.0 184.0" fill="none" stroke="#ffd0da" stroke-opacity=".5" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/>
+<path d="M47.0 128.0 L60.0 148.0 L73.0 128.0" fill="none" stroke="#ffd0da" stroke-opacity=".5" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/>
+<circle cx="36.0" cy="94.0" r="4.4" fill="url(#axc-nd)"/><circle cx="36.0" cy="94.0" r="1.00" fill="#fff"/>
+<circle cx="84.0" cy="94.0" r="4.4" fill="url(#axc-nd)"/><circle cx="84.0" cy="94.0" r="1.00" fill="#fff"/>
+<circle cx="47.0" cy="88.0" r="4.4" fill="url(#axc-nd)"/><circle cx="47.0" cy="88.0" r="1.00" fill="#fff"/>
+<circle cx="73.0" cy="88.0" r="4.4" fill="url(#axc-nd)"/><circle cx="73.0" cy="88.0" r="1.00" fill="#fff"/>
+<circle cx="60.0" cy="96.0" r="5.7" fill="url(#axc-nd)"/><circle cx="60.0" cy="96.0" r="1.30" fill="#fff"/>
+<circle cx="60.0" cy="118.0" r="7.5" fill="url(#axc-nd)"/><circle cx="60.0" cy="118.0" r="1.70" fill="#fff"/>
+<circle cx="47.0" cy="128.0" r="4.0" fill="url(#axc-nd)"/><circle cx="47.0" cy="128.0" r="0.90" fill="#fff"/>
+<circle cx="73.0" cy="128.0" r="4.0" fill="url(#axc-nd)"/><circle cx="73.0" cy="128.0" r="0.90" fill="#fff"/>
+<circle cx="60.0" cy="148.0" r="4.8" fill="url(#axc-nd)"/><circle cx="60.0" cy="148.0" r="1.10" fill="#fff"/>
+<circle cx="46.0" cy="162.0" r="4.0" fill="url(#axc-nd)"/><circle cx="46.0" cy="162.0" r="0.90" fill="#fff"/>
+<circle cx="74.0" cy="162.0" r="4.0" fill="url(#axc-nd)"/><circle cx="74.0" cy="162.0" r="0.90" fill="#fff"/>
+<circle cx="60.0" cy="184.0" r="5.7" fill="url(#axc-nd)"/><circle cx="60.0" cy="184.0" r="1.30" fill="#fff"/>
+</g>
+<g class="fb-aL"><path d="M31.6 86 Q23.6 88.2 22.4 99 L20.6 160 Q19.8 175 22.6 188 Q24.6 196 28.6 196 Q32.8 195.6 33.2 188 Q34 176 34.6 166 L37 112 Q37.8 94 31.6 86 Z" fill="url(#axc-g)"/><path d="M31.6 86 Q23.6 88.2 22.4 99 L20.6 160 Q19.8 175 22.6 188 Q24.6 196 28.6 196 Q32.8 195.6 33.2 188 Q34 176 34.6 166 L37 112 Q37.8 94 31.6 86 Z" fill="url(#axc-st)" opacity="0.85"/><path d="M35.6 106 L32.6 166" fill="none" stroke="#000" stroke-opacity=".5" stroke-width=".9" stroke-linecap="round"/><path d="M26.6 87 Q22.2 89 22.4 99 L20.6 160 Q19.8 175 22.6 188" fill="none" stroke="#cfd4ff" stroke-opacity=".4" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/><path d="M30.0 93.0 L27.4 120.0 L25.6 146.0 L24.6 168.0 L27.2 194.0" fill="none" stroke="#ffd0da" stroke-opacity=".55" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="30.0" cy="93.0" r="4.4" fill="url(#axc-nd)"/><circle cx="30.0" cy="93.0" r="1.00" fill="#fff"/><circle cx="27.4" cy="120.0" r="4.4" fill="url(#axc-nd)"/><circle cx="27.4" cy="120.0" r="1.00" fill="#fff"/><circle cx="24.6" cy="168.0" r="5.3" fill="url(#axc-nd)"/><circle cx="24.6" cy="168.0" r="1.20" fill="#fff"/><circle cx="27.2" cy="194.0" r="5.7" fill="url(#axc-nd)"/><circle cx="27.2" cy="194.0" r="1.30" fill="#fff"/></g>
+<g class="fb-aR"><path d="M88.4 86Q 96.4 88.2 97.6 99L 99.4 160Q 100.2 175 97.4 188Q 95.4 196 91.4 196Q 87.2 195.6 86.8 188Q 86 176 85.4 166L 83 112Q 82.2 94 88.4 86Z" fill="url(#axc-gr)"/><path d="M88.4 86Q 96.4 88.2 97.6 99L 99.4 160Q 100.2 175 97.4 188Q 95.4 196 91.4 196Q 87.2 195.6 86.8 188Q 86 176 85.4 166L 83 112Q 82.2 94 88.4 86Z" fill="url(#axc-st)" opacity="0.85"/><path d="M84.4 106L 87.4 166" fill="none" stroke="#000" stroke-opacity=".5" stroke-width=".9" stroke-linecap="round"/><path d="M93.4 87Q 97.8 89 97.6 99L 99.4 160Q 100.2 175 97.4 188" fill="none" stroke="#ff8097" stroke-opacity=".68" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/><path d="M90.0 93.0 L92.6 120.0 L94.4 146.0 L95.4 168.0 L92.8 194.0" fill="none" stroke="#ffd0da" stroke-opacity=".55" stroke-width=".45" stroke-linecap="round" stroke-linejoin="round"/><circle cx="90.0" cy="93.0" r="4.4" fill="url(#axc-nd)"/><circle cx="90.0" cy="93.0" r="1.00" fill="#fff"/><circle cx="92.6" cy="120.0" r="4.4" fill="url(#axc-nd)"/><circle cx="92.6" cy="120.0" r="1.00" fill="#fff"/><circle cx="95.4" cy="168.0" r="5.3" fill="url(#axc-nd)"/><circle cx="95.4" cy="168.0" r="1.20" fill="#fff"/><circle cx="92.8" cy="194.0" r="5.7" fill="url(#axc-nd)"/><circle cx="92.8" cy="194.0" r="1.30" fill="#fff"/></g>
+<ellipse cx="60" cy="74" rx="11" ry="8" fill="url(#axf-nk)"/>
+</svg><span class="ax" data-ax="pres" data-vb="0 0 120" data-tone="dark"><span class="ax-badge"><svg class="ax-sv" viewBox="0 0 120 120" aria-hidden="true" focusable="false"><use href="#ax-body"></use></svg></span><canvas class="ax-cv" aria-hidden="true"></canvas></span></span>
       <i class="sp-spk s1"></i><i class="sp-spk s2"></i><i class="sp-spk s3"></i>
     </div>
     <div class="sp-say" id="sp-say">
@@ -265,9 +334,11 @@
 
 <div class="mdl" id="mdl" hidden role="dialog" aria-modal="true" aria-labelledby="mdl-t" aria-describedby="mdl-d"></div>
 
+<div class="pf" id="pf" hidden role="dialog" aria-modal="true" aria-labelledby="pf-t" aria-describedby="pf-d"></div>
+
 <div class="app pre" id="app" inert>
   <aside class="sb" aria-label="Barra lateral">
-    <a class="brand" href="#panel" data-v="panel" aria-label="ValidLance, ir al panel"><span class="vl-logo vl-logo--sm" data-vl><svg class="vl-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
+    <a class="brand" href="#hub" data-v="hub" aria-label="ValidLance, ir al centro de control"><span class="vl-logo vl-logo--sm" data-vl><svg class="vl-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" focusable="false">
   
   <defs>
     <!-- caras de la V: granate con banda de brillo metálico a lo largo del brazo -->
@@ -388,12 +459,16 @@
     <button class="proj" type="button" data-act="go" data-v="panel" id="proj-card" aria-label="Proyecto actual: abrir el panel"></button>
     <nav class="nav" aria-label="Módulos">
       <div class="nav-l">Proyecto</div>
+      <a class="nv" href="#hub" data-v="hub"><svg class="i" aria-hidden="true"><use href="#i-hub"></use></svg><span>Centro de control</span></a>
       <a class="nv" href="#panel" data-v="panel"><svg class="i" aria-hidden="true"><use href="#i-home"></use></svg><span>Panel</span></a>
       <div class="nav-l" style="padding-top:12px">Ruta</div>
       <a class="nv" href="#valida" data-v="valida"><svg class="i" aria-hidden="true"><use href="#i-valida"></use></svg><span>Valida</span><span class="pc" id="pc-valida"></span></a>
       <a class="nv" href="#compite" data-v="compite"><svg class="i" aria-hidden="true"><use href="#i-compite"></use></svg><span>Compite</span><span class="pc" id="pc-compite"></span></a>
       <a class="nv" href="#lanza" data-v="lanza"><svg class="i" aria-hidden="true"><use href="#i-lanza"></use></svg><span>Lanza</span><span class="pc" id="pc-lanza"></span></a>
       <a class="nv" href="#genera" data-v="genera"><svg class="i" aria-hidden="true"><use href="#i-genera"></use></svg><span>Genera</span><span class="pc" id="pc-genera"></span></a>
+      <div class="nav-l" style="padding-top:12px">Premium</div>
+      <a class="nv" href="#comunidad" data-v="comunidad"><svg class="i" aria-hidden="true"><use href="#i-people"></use></svg><span>Comunidad</span><span class="pc" id="pc-comunidad"></span></a>
+      <button class="nv" type="button" data-act="agents-open"><svg class="i" aria-hidden="true"><use href="#i-agents"></use></svg><span>Agentes especializados</span></button>
     </nav>
     <div class="sb-sp"></div>
     <a class="link-proto js-proto" href="#" target="_blank" rel="noopener" id="side-proto">
@@ -420,8 +495,11 @@
             <div class="menu" id="menu-user" role="menu" hidden>
               <div class="who"><b>Mi proyecto</b><span id="menu-proj"></span></div>
               <hr>
+              <button type="button" role="menuitem" data-act="pf-edit" id="menu-me"><svg class="i sm" aria-hidden="true"><use href="#i-route"></use></svg><span id="menu-me-t">Mi perfil y ruta</span><small class="menu-s" id="menu-me-s"></small></button>
               <button type="button" role="menuitem" data-act="model-change" id="menu-model" hidden><svg class="i sm" aria-hidden="true"><use href="#i-swap"></use></svg>Cambiar modelo de negocio</button>
               <button type="button" role="menuitem" data-act="cfg-proto"><svg class="i sm" aria-hidden="true"><use href="#i-ext"></use></svg>Conectar prototipo</button>
+              <button type="button" role="menuitem" data-act="cfg-rag"><svg class="i sm" aria-hidden="true"><use href="#i-bolt"></use></svg>IA con tu proyecto (RAG)<small class="menu-s" id="menu-rag-s"></small></button>
+              <button type="button" role="menuitem" data-act="menu-plan"><svg class="i sm" aria-hidden="true"><use href="#i-star"></use></svg><span id="menu-plan-t">Pasar a Premium</span><small class="menu-s" id="menu-plan-s">Gratuito</small></button>
               <button type="button" role="menuitem" data-act="theme"><svg class="i sm" aria-hidden="true"><use href="#i-moon"></use></svg>Cambiar tema</button>
               <button type="button" role="menuitem" data-act="reset"><svg class="i sm" aria-hidden="true"><use href="#i-refresh"></use></svg><span id="menu-reset-t">Empezar de cero</span></button>
             </div>
@@ -430,16 +508,19 @@
       </div>
     </header>
     <main class="page" id="page">
+      <section class="view" id="v-hub" aria-label="Centro de control"></section>
       <section class="view" id="v-panel" aria-label="Panel"></section>
       <section class="view" id="v-valida" aria-label="Valida"></section>
       <section class="view" id="v-compite" aria-label="Compite"></section>
       <section class="view" id="v-lanza" aria-label="Lanza"></section>
       <section class="view" id="v-genera" aria-label="Genera"></section>
+      <section class="view" id="v-comunidad" aria-label="Comunidad y validación"></section>
     </main>
   </div>
 </div>
 
 <nav class="bn" aria-label="Navegación principal" inert>
+  <a href="#hub" data-v="hub"><svg class="i" aria-hidden="true"><use href="#i-hub"></use></svg>Centro</a>
   <a href="#panel" data-v="panel"><svg class="i" aria-hidden="true"><use href="#i-home"></use></svg>Panel</a>
   <a href="#valida" data-v="valida"><svg class="i" aria-hidden="true"><use href="#i-valida"></use></svg>Valida</a>
   <a href="#compite" data-v="compite"><svg class="i" aria-hidden="true"><use href="#i-compite"></use></svg>Compite</a>
@@ -517,6 +598,56 @@
       </div>
     </div>
   </div>
+</div>
+
+<div class="modal" id="m-rag" hidden role="dialog" aria-modal="true" aria-labelledby="m-rag-t">
+  <div class="modal-c">
+    <div>
+      <h3 id="m-rag-t">IA con tu proyecto (RAG)</h3>
+      <p style="margin-top:6px">Astro puede responder a lo que escribas en el chat usando <b>tu proyecto real</b> y la guía de ValidLance, con ayuda de un servidor propio (LlamaIndex). Por defecto está apagado: la app no envía nada a ningún sitio.</p>
+    </div>
+    <div class="field">
+      <label class="lbl" for="rag-url">Dirección de tu servidor</label>
+      <input class="in" id="rag-url" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="http://localhost:8787">
+      <p class="help" id="rag-help"></p>
+    </div>
+    <div class="field">
+      <label class="lbl" for="rag-notes">Notas del proyecto (opcional)</label>
+      <textarea class="in" id="rag-notes" rows="4" maxlength="6000" placeholder="Pega lo que quieras que Astro tenga en cuenta: charlas con clientes, resultados de encuestas, el texto de tu landing…"></textarea>
+      <p class="help"><span id="rag-notes-n">0</span>/6000 · Se guardan solo en este dispositivo y viajan al servidor únicamente cuando preguntas en el chat.</p>
+    </div>
+    <label class="rag-consent"><input type="checkbox" id="rag-consent"><span>Acepto que lo que escriba en el chat de Astro, mi idea, mi modelo, mi progreso, el resumen de mi análisis, mis notas, mi perfil y mi ruta (nombre de pila, situación, objetivo, tiempo y presupuesto, si los he contado) y un resumen corto de lo que hemos hablado (mis cifras, decisiones y temas) se envíen a ese servidor, que los procesa con un modelo de IA. No incluiré datos personales ni confidenciales de otras personas.</span></label>
+    <p class="help rag-status" id="rag-status" role="status" aria-live="polite"></p>
+    <div class="row sp">
+      <button class="btn ghost" type="button" data-act="rag-close">Cerrar</button>
+      <div class="row">
+        <button class="btn" type="button" data-act="rag-test">Probar conexión</button>
+        <button class="btn pri" type="button" data-act="rag-save">Guardar y activar</button>
+      </div>
+    </div>
+    <button class="link-cfg" type="button" data-act="rag-off"><svg class="i sm" aria-hidden="true"><use href="#i-x"></use></svg>Desactivar y borrar mis notas del servidor</button>
+  </div>
+</div>
+
+<div class="modal pm" id="m-premium" hidden role="dialog" aria-modal="true" aria-labelledby="pm-t" aria-describedby="pm-d">
+  <div class="modal-c pm-c" id="pm-c"></div>
+</div>
+
+<div class="modal" id="m-agents" hidden role="dialog" aria-modal="true" aria-labelledby="ag-t" aria-describedby="ag-d">
+  <div class="modal-c ag-c">
+    <div class="ag-hd">
+      <div><span class="pm-kick"><svg class="i sm" aria-hidden="true"><use href="#i-star"></use></svg>ValidLance Premium</span><h3 id="ag-t">Red de agentes especializados</h3>
+        <p id="ag-d">Un agente por sector, con la guía de su vertical: cómo validar, cobrar y captar en SaaS, e-commerce, servicios, trading y formación.</p></div>
+      <button class="btn ico ghost" type="button" id="ag-close" data-act="agents-close" aria-label="Cerrar"><svg class="i" aria-hidden="true"><use href="#i-x"></use></svg></button>
+    </div>
+    <div class="ag-state" id="ag-state"></div>
+    <div class="agc-g" id="ag-g"></div>
+    <p class="fine">Son agentes virtuales: se apoyan en guías y reglas de su sector y en las cifras que tú anotas, no en datos de mercado en tiempo real. No son asesoramiento legal ni financiero. Astro, tu mentor principal, sigue disponible gratis.</p>
+  </div>
+</div>
+
+<div class="modal cmm" id="m-com" hidden role="dialog" aria-modal="true" aria-labelledby="cmm-t">
+  <div class="modal-c cmm-c" id="cmm-c"></div>
 </div>
 
 <noscript><div class="boot-msg" role="alert"><div>

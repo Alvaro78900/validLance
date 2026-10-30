@@ -3,9 +3,20 @@
 /* Arranque seguro (ES5 a propósito, para que funcione aunque el resto falle):
    avisa si la app no llega a arrancar y ofrece reintentar. No carga nada de internet. */
 (function () {
+  try { document.documentElement.setAttribute('data-theme', 'dark'); } catch (e) { /* sin DOM */ } // oscuro desde el primer pintado, aunque el móvil esté en modo claro
   function $(id) { return document.getElementById(id); }
   function on(id, fn) { var el = $(id); if (el) el.addEventListener('click', fn); }
   function reload() { try { location.reload(); } catch (e) { /* sin acceso */ } }
+  // Inicio limpio: «?nuevo» o «#nuevo» al final del enlace borra lo guardado (perfil, proyecto, Astro y bienvenida)
+  // y arranca como la primera vez. No toca la conexión con tu servidor de Astro (lv_rag_v1). Corre antes que el resto de la app.
+  var CLEAN = /[?&#](nuevo|limpio)([=&#]|$)/;
+  function wipe() {
+    var ks = ['lv_panel_v1', 'lv_agent_v1', 'lv_astra_v1', 'lv_splash_welcome_v1'];
+    for (var i = 0; i < ks.length; i++) { try { localStorage.removeItem(ks[i]); } catch (e) { /* sin almacenamiento */ } }
+    try { history.replaceState(null, '', location.pathname + (/^#(nuevo|limpio)$/.test(location.hash) ? '' : location.hash)); } catch (e) { /* el visor no deja cambiar la dirección */ }
+  }
+  try { if (CLEAN.test(location.search + location.hash)) wipe(); } catch (e) { /* sin acceso a la dirección */ }
+  try { window.addEventListener('hashchange', function () { try { if (CLEAN.test(location.hash)) { wipe(); reload(); } } catch (e) { /* sin acceso */ } }); } catch (e) { /* sin eventos */ }
   on('boot-retry', reload);
   on('boot-clear', function () { try { localStorage.removeItem('lv_panel_v1'); localStorage.removeItem('lv_agent_v1'); } catch (e) { /* sin almacenamiento */ } reload(); });
   on('boot-skip', function () { var b = $('boot-fail'); if (b) b.hidden = true; });
@@ -879,7 +890,7 @@ const SECTOR_COLORS = [
 
 function defaults() {
   return {
-    ver: 5, view: 'panel', theme: 'auto', protoUrl: '',
+    ver: 5, view: 'hub', theme: 'auto', protoUrl: '',
     mdl: { id: '', sub: '', custom: '', base: 'auto', at: 0 },
     idea: { name: '', pitch: '', audience: '', sector: 'auto' },
     landing: { tone: 'cercano', color: 'auto', cta: '', lv: 0, vs: 0, sv: 0, custom: [], endpoint: '', formula: 'auto', family: 'auto', mode: 'auto', copy: {}, blocks: {}, size: 'std',
@@ -889,6 +900,10 @@ function defaults() {
     lanza: { biz: '', emp: false, loc: false, eu: false, view: 'board', status: {}, hideDone: false, touched: false },
     genera: { visited: false, tweaked: false, exported: false, device: 'desktop', pane: 'view', pub: null, url: '', open: { style: true } },
     est: { ver: 1 },
+    // la persona (no el proyecto): nombre, situación, objetivo, tiempo y presupuesto. Solo se guarda en este navegador
+    me: { v: 1, name: '', occ: '', res: [], goal: '', goalTxt: '', hours: 0, when: [], cap: '', done: false, skip: false, at: 0 },
+    // hoja de ruta de Astro: pasos hechos a mano (por id), huella de lo que la condiciona y si el detalle está abierto
+    route: { done: {}, sig: '', at: 0, open: false },
   };
 }
 function merge(d, o) {
@@ -925,11 +940,11 @@ let saveT = 0;
 function save() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify(S)); } catch (e) { /* ignorar */ } }, 200); }
 
 // registro de módulos y acciones
-const LV = { state: S, ACT: {}, RENDER: {}, hooks: { change: [], view: [], mdl: [] }, ic, esc, $, $$, clamp, fmt, pc, eur, nf, hash, rng, getPath, setPath, dayLabel, save, SECTOR_COLORS };
+const LV = { state: S, ACT: {}, RENDER: {}, hooks: { change: [], view: [], mdl: [], plan: [] }, ic, esc, $, $$, clamp, fmt, pc, eur, nf, hash, rng, getPath, setPath, dayLabel, save, SECTOR_COLORS };
 window.LV = LV;
 LV.storeOK = (function () { try { const k = '__lv_t'; localStorage.setItem(k, '1'); localStorage.removeItem(k); return true; } catch (e) { return false; } })();
 LV.reset = () => {
-  const keep = { theme: S.theme, protoUrl: S.protoUrl };
+  const keep = { theme: S.theme, protoUrl: S.protoUrl }; if (S.plan) keep.plan = S.plan; if (S.me) keep.me = S.me; // el plan y el perfil son de la persona, no del proyecto
   try { localStorage.removeItem(KEY); } catch (e) { /* ignorar */ }
   if (LV.inf) LV.inf.cancel();
   Object.keys(S).forEach((k) => { delete S[k]; }); Object.assign(S, defaults(), keep); if (LV.model) LV.model.apply(); save();
@@ -998,17 +1013,21 @@ LV.saveFile = async function (name, text, mime) {
 };
 
 // ---------- tema ----------
-function effectiveTheme() { if (S.theme !== 'auto') return S.theme; return window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches && document.documentElement.getAttribute('data-theme') !== 'dark' ? 'light' : 'dark'; }
+// La interfaz es OSCURA por defecto (negro profundo y granate): el modo claro del móvil o del navegador ya no la cambia.
+// El modo claro solo existe si la persona lo activa a mano con el botón del tema, y la pantalla de elección de modelo
+// y el Centro de control van SIEMPRE en oscuro (en ellas el botón del tema no se muestra: html[data-lock]).
+function themeLocked() { const g = document.getElementById('mdl'), o = document.getElementById('pf'); return !!(g && !g.hidden) || !!(o && !o.hidden) || S.view === 'hub'; }
+function effectiveTheme() { return !themeLocked() && S.theme === 'light' ? 'light' : 'dark'; }
 function applyTheme() {
-  const r = document.documentElement;
-  if (S.theme === 'auto') r.removeAttribute('data-theme'); else r.setAttribute('data-theme', S.theme);
-  const eff = S.theme === 'auto' ? (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : S.theme;
+  const r = document.documentElement, eff = effectiveTheme(), lock = themeLocked();
+  if (r.getAttribute('data-theme') !== eff) r.setAttribute('data-theme', eff); // siempre explícito: así el CSS nunca depende de prefers-color-scheme
+  if (lock) r.setAttribute('data-lock', ''); else r.removeAttribute('data-lock');
   const b = $('#btn-theme'); if (b) b.innerHTML = ic(eff === 'dark' ? 'sun' : 'moon');
 }
 LV.applyTheme = applyTheme;
 LV.ACT.theme = function () {
-  const eff = S.theme === 'auto' ? (window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark') : S.theme;
-  S.theme = eff === 'dark' ? 'light' : 'dark'; save(); applyTheme(); closeMenu(); LV.refresh();
+  if (themeLocked()) return; // en el Centro de control y en la elección de modelo el tema es siempre oscuro
+  S.theme = S.theme === 'light' ? 'dark' : 'light'; save(); applyTheme(); closeMenu(); LV.refresh();
 };
 
 // ---------- enlace al prototipo ----------
@@ -1050,7 +1069,7 @@ let resetArm = 0, resetT = 0;
 function disarmReset() { resetArm = 0; clearTimeout(resetT); const l = $('#menu-reset-t'); if (l) l.textContent = 'Empezar de cero'; }
 LV.ACT.reset = function () {
   if (!resetArm) { resetArm = 1; const l = $('#menu-reset-t'); if (l) l.textContent = 'Pulsa otra vez para borrar todo'; clearTimeout(resetT); resetT = setTimeout(disarmReset, 4000); return; }
-  disarmReset(); closeMenu(); LV.reset(); applyTheme(); applyProto(); LV.restartLive(); LV.syncInputs(); LV.go('panel'); toast('Proyecto borrado. Empiezas de cero.', 'refresh');
+  disarmReset(); closeMenu(); LV.reset(); applyTheme(); applyProto(); LV.restartLive(); LV.syncInputs(); LV.go('hub'); toast('Proyecto borrado. Empiezas de cero.', 'refresh');
 };
 
 // ---------- entradas enlazadas ----------
@@ -1067,22 +1086,24 @@ document.addEventListener('input', onBind);
 document.addEventListener('change', (e) => { if (e.target.tagName === 'SELECT') onBind(e); });
 
 // ---------- navegación ----------
-const VIEWS = ['panel', 'valida', 'compite', 'lanza', 'genera'];
-const TITLES = { panel: 'Panel', valida: 'Valida', compite: 'Compite', lanza: 'Lanza', genera: 'Genera' };
+const VIEWS = ['hub', 'panel', 'valida', 'compite', 'lanza', 'genera', 'comunidad'];
+const TITLES = { hub: 'Centro<span class="hd-xl"> de control</span>', panel: 'Panel', valida: 'Valida', compite: 'Compite', lanza: 'Lanza', genera: 'Genera', comunidad: 'Comunidad<span class="hd-xl"> &amp; Validación</span>' };
 const SUBS = {
+  hub: () => (LV.model && LV.model.key() ? 'Tu modelo: ' + LV.model.label() + ' · elige por dónde empezar' : 'Elige por dónde empezar'),
   panel: () => (LV.hasIdea() ? S.idea.name.trim() + ' · ' + LV.phaseText() : 'Empieza describiendo tu idea'),
   valida: () => 'Landing y encuesta para medir la demanda real',
   compite: () => 'Mercado, competencia y plan en un solo flujo' + (S.idea.name.trim() ? ' de ' + S.idea.name.trim() : ''),
   lanza: () => 'Ruta de trámites, costes y plazos',
   genera: () => 'Estudio de landings con vista previa en directo',
+  comunidad: () => (LV.premium && LV.premium.has() ? 'Muro, feedback, buscador y contactos de emprendedores' : 'Incluido en el plan Premium'),
 };
 LV.go = function (v) {
   if (VIEWS.indexOf(v) < 0) v = 'panel';
   if (LV.model && LV.model.needs()) { LV.model.open(); return; } // sin modelo de negocio elegido no se entra en ningún módulo
-  S.view = v;
+  S.view = v; applyTheme(); // el Centro de control siempre va en oscuro; los módulos, en el tema elegido
   $$('.view').forEach((el) => el.classList.toggle('is-on', el.id === 'v-' + v));
   $$('.nv[data-v], .bn a[data-v]').forEach((a) => { if (a.dataset.v === v) a.setAttribute('aria-current', 'page'); else a.removeAttribute('aria-current'); });
-  $('#hd-title').textContent = TITLES[v];
+  $('#hd-title').innerHTML = TITLES[v]; // textos fijos de este archivo, sin datos de la persona
   $('#hd-sub').textContent = SUBS[v]();
   document.title = 'ValidLance Panel';
   if (LV.RENDER[v]) LV.RENDER[v](true);
@@ -1253,7 +1274,7 @@ LV.renderChrome = function () {
   const ve = $('#hd-verdict');
   if (LV.hasData()) { ve.className = 'chip hide-m ' + vd.cls; ve.textContent = vd.label + ' · ' + vd.ok + '/' + vd.total + ' criterios'; } else { ve.className = 'chip hide-m'; ve.textContent = 'Sin datos todavía'; }
   $('#menu-proj').textContent = has ? name + ' · ' + LV.sector().label : 'Aún sin idea';
-  $('#hd-sub').textContent = ({ panel: has ? name + ' · ' + LV.phaseText() : 'Empieza describiendo tu idea', valida: 'Landing y encuesta para medir la demanda real', compite: 'Mercado, competencia y plan en un solo flujo' + (S.idea.name.trim() ? ' de ' + name : ''), lanza: 'Ruta de trámites, costes y plazos', genera: 'Estudio de landings con vista previa en directo' })[S.view];
+  $('#hd-sub').textContent = ({ hub: (LV.model.key() ? 'Tu modelo: ' + LV.model.label() + ' · elige por dónde empezar' : 'Elige por dónde empezar'), panel: has ? name + ' · ' + LV.phaseText() : 'Empieza describiendo tu idea', valida: 'Landing y encuesta para medir la demanda real', compite: 'Mercado, competencia y plan en un solo flujo' + (S.idea.name.trim() ? ' de ' + name : ''), lanza: 'Ruta de trámites, costes y plazos', genera: 'Estudio de landings con vista previa en directo' })[S.view];
   LV.model.paint();
   LV.applyTheme(); LV.applyProto();
 };
@@ -3110,10 +3131,10 @@ function shortName(n) {
   return o.replace(/\s+(de|del|y|con|en|a|los|las|el|la|por|para)$/i, '') || n.slice(0, 22);
 }
 function viabBand(v) {
-  if (v >= 72) return { k: 'alta', l: 'Alta viabilidad', cls: 'ok', ico: 'check', t: 'Hay base sólida para pasar a validar con clientes reales.' };
-  if (v >= 55) return { k: 'media', l: 'Viable con ajustes', cls: 'warn', ico: 'bulb', t: 'La idea se sostiene, pero conviene reforzar la diferenciación y vigilar el capital.' };
-  if (v >= 40) return { k: 'incierta', l: 'Viabilidad incierta', cls: 'warn', ico: 'alert', t: 'Hay señales mixtas: valida en pequeño antes de invertir.' };
-  return { k: 'baja', l: 'Replantear la idea', cls: 'risk', ico: 'alert', t: 'Con los datos actuales el riesgo supera a la oportunidad. Cambia el enfoque.' };
+  if (v >= 72) return { k: 'alta', l: 'Alta viabilidad', cls: 'ok', ico: 'check', t: 'Hay base sólida: pasa a validar con clientes reales.' };
+  if (v >= 55) return { k: 'media', l: 'Viable con ajustes', cls: 'warn', ico: 'bulb', t: 'Se sostiene, pero refuerza la diferenciación y cuida el capital.' };
+  if (v >= 40) return { k: 'incierta', l: 'Viabilidad incierta', cls: 'warn', ico: 'alert', t: 'Señales mixtas: valida en pequeño antes de invertir.' };
+  return { k: 'baja', l: 'Replantear la idea', cls: 'risk', ico: 'alert', t: 'El riesgo supera a la oportunidad. Cambia el enfoque.' };
 }
 function riskBand(r) {
   if (r < 30) return { k: 'bajo', l: 'Riesgo bajo', cls: 'ok' };
@@ -3512,11 +3533,11 @@ function buildSummary(rep) {
   const rp = rep.riskParts.slice().sort((a, b) => b.v - a.v)[0];
   const lever = ({ dem: 'la demanda', room: 'el espacio libre', dif: 'tu diferenciación', eco: 'la economía del proyecto', ops: 'la operativa', acq: 'la captación' })[top];
   const weak = ({ dem: 'la demanda', room: 'el espacio frente a la competencia', dif: 'la diferenciación', eco: 'la economía', ops: 'la operativa', acq: 'la captación de clientes' })[low];
-  return '«' + name + '» (' + sector.label.toLowerCase() + ', ' + type.l.toLowerCase() + ') obtiene ' + rep.viab + ' sobre 100: ' + band.l.toLowerCase() + '. ' +
-    'La competencia es ' + market.satL.l.toLowerCase() + ' (' + market.sat + ' % de saturación) y ' + (F.room >= 55 ? 'queda espacio para entrar con una propuesta clara' : 'queda poco espacio sin diferenciarte') + '. ' +
-    'Tu mejor baza es ' + lever + ' (' + F[top] + '/100); donde más puedes mejorar es ' + weak + ' (' + F[low] + '/100). ' +
-    'El mayor foco de riesgo es «' + rp.l.toLowerCase() + '». ' +
-    (econ.budget ? 'Con tu presupuesto podrías captar unos ' + econ.reach + ' clientes de pago antes de agotar el 55 % en marketing, frente a los ≈ ' + econ.be + ' que necesitas para cubrir costes fijos.' : 'Indica un presupuesto para estimar cuántos clientes podrías captar.');
+  return '«' + name + '» saca ' + rep.viab + '/100: ' + band.l.toLowerCase() + '. ' +
+    'Competencia ' + market.satL.l.toLowerCase() + ' (' + market.sat + ' % de saturación): ' + (F.room >= 55 ? 'queda espacio si tu propuesta es clara' : 'queda poco espacio sin diferenciarte') + '. ' +
+    'Tu mejor baza: ' + lever + ' (' + F[top] + '/100). Lo que más puedes mejorar: ' + weak + ' (' + F[low] + '/100). ' +
+    'Mayor riesgo: «' + rp.l.toLowerCase() + '». ' +
+    (econ.budget ? 'Con tu presupuesto captas ≈ ' + econ.reach + ' clientes de pago antes de gastar el 55 % en marketing. Para cubrir costes fijos necesitas ≈ ' + econ.be + '.' : 'Indica un presupuesto y calculo cuántos clientes podrías captar.');
 }
 
 // ---------- exportar el informe como texto ----------
@@ -3525,9 +3546,10 @@ function reportText(rep, adopted, road) {
   const sc = withAdopt(rep, adopted); const f = (n) => String(n).replace('.', ',');
   const L = [];
   L.push('# Informe de viabilidad · ' + rep.name, '');
-  L.push('Informe simulado por ValidLance (motor de reglas): estimaciones orientativas, no datos reales de mercado ni asesoramiento profesional.', '');
+  L.push('**' + rep.viab + '/100 · ' + rep.band.l + '.** ' + rep.band.t, '');
+  L.push('Simulación de ValidLance (motor de reglas): estimaciones orientativas, no datos reales de mercado ni asesoramiento profesional.', '');
   L.push('Sector: ' + rep.sector.label + ' · Tipo: ' + rep.type.l + ' · Ámbito: ' + rep.scope.l + ' · Presupuesto: ' + eur(rep.budget), '');
-  L.push('## Resumen', rep.summary, '');
+  L.push('## En corto', rep.summary, '');
   L.push('## Puntuación', '- Viabilidad: ' + rep.viab + '/100 (' + rep.band.l + ')', '- Probabilidad orientativa de éxito: ' + rep.prob + ' %', '- Índice de riesgo: ' + rep.risk + '/100 (' + rep.rband.l + ')');
   if (sc.n) L.push('- Con las propuestas aplicadas (' + sc.n + '): viabilidad ' + sc.viab + '/100, riesgo ' + sc.risk + '/100, probabilidad ' + sc.prob + ' %');
   L.push('');
@@ -5565,9 +5587,10 @@ VE.mount = function (root, opts) {
     root.innerHTML = '<div class="est' + (opts.embedded ? ' emb' : '') + '" role="region" aria-label="Estrategia de precio, público y posicionamiento">' + topHtml() +
       '<section class="est-sec" id="' + uid + 'model" data-sec="model" aria-labelledby="' + uid + 'h1"><header class="est-sh"><span class="est-n" aria-hidden="true">1</span><div><h4 id="' + uid + 'h1">Tipo de negocio</h4><p>' + (opts.compact ? 'Así se adapta el análisis a tu modelo de negocio.' : 'Elige el que más se parezca a tu idea.') + '</p></div></header>' + (opts.compact ? '<div data-r="det"></div>' + stripHtml() + '<details class="est-dt"><summary>Cambiar el tipo de negocio</summary>' + tilesHtml() + '</details>' : ideaHtml() + tilesHtml() + stripHtml()) + '</section>' +
       priceSec() + targetHtml() + posSec() + cmpSec() + srcHtml() +
-      '<p class="est-foot">' + I('info') + '<span><b>Es una simulación apoyada en datos de mercado, no asesoramiento legal, fiscal ni financiero.</b> Las cifras publicadas llevan su fuente y las estimadas, su método. Antes de decidir, contrasta los números con clientes reales (Valida) y con un profesional.</span></p>' +
+      '<p class="est-foot">' + I('info') + '<span><b>Simulación con datos de mercado. No es asesoramiento legal, fiscal ni financiero.</b> Las cifras publicadas llevan fuente; las estimadas, método. Antes de decidir, contrasta con clientes reales (Valida) y con un profesional.</span></p>' +
       '<div class="est-toast" role="status" data-r="toast"></div><div class="sr" aria-live="polite" data-r="live"></div></div>';
     const dr = q('[data-r="det"]'); if (dr) dr.innerHTML = detHtml();
+    if (opts.embedded) setTab(tab);
     paintResults();
     if (keep) { const el = q('[data-fk="' + keep + '"]'); if (el) el.focus({ preventScroll: true }); }
     if (y0 != null && root.closest('.main')) root.closest('.main').scrollTop = y0;
@@ -5692,7 +5715,15 @@ VE.mount = function (root, opts) {
     valida() { if (opts.goValida) opts.goValida(); },
     go(el) { go(el.dataset.v); },
   };
+  let tab = 'price';
+  /** Dentro de Compite el módulo se ve por pestañas: solo una sección a la vez (mucho menos desplazamiento). */
+  function setTab(k) {
+    const est = q('.est'); if (!est || !opts.embedded || !q('[data-sec="' + k + '"]')) return; tab = k; est.dataset.tab = k;
+    qa('.est-sec[data-sec]').forEach((sec) => sec.classList.toggle('tab-off', sec.dataset.sec !== k));
+    qa('.est-nav [data-ea="go"]').forEach((b) => { const on = b.dataset.v === k; b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); });
+  }
   function go(k) {
+    if (opts.embedded) { setTab(k); setTimeout(() => { if (q('.est')) paintResults(); }, 0); }
     const t = q('[data-sec="' + k + '"]'); if (!t) return; const red = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
     t.scrollIntoView({ block: 'start', behavior: red ? 'auto' : 'smooth' }); const h = t.querySelector('h4'); if (h) { h.tabIndex = -1; h.focus({ preventScroll: true }); }
   }
@@ -6084,7 +6115,7 @@ function thrNote() {
 }
 function emptyGoHtml() {
   const rows = LV.criteria().map((c) => '<li><span>' + esc(c.label) + '</span><b>' + esc(c.goal.replace('mínimo orientativo ', '').replace('muestra mínima ', '')) + '</b></li>').join('');
-  return '<div class="gn-empty"><span class="ic">' + ic('compite') + '</span><div><b>Aún no hay respuestas</b><p>Cuando lleguen visitas y encuestas verás aquí si hay señal de demanda. Esto es lo que medimos:</p></div></div>' +
+  return '<div class="gn-empty"><span class="ic">' + ic('compite') + '</span><div><b>Aún no hay respuestas</b><p>Cuando lleguen visitas y encuestas verás aquí si hay demanda. Esto es lo que medimos:</p></div></div>' +
     '<ul class="gn-goals">' + rows + '</ul>' +
     '<div class="row" style="margin-top:16px"><button class="btn sm" type="button" data-act="go" data-v="valida">' + ic('valida', 'sm') + 'Anotar mis resultados' + ic('right', 'sm') + '</button></div>' +
     '<p class="fine">' + thrNote() + '</p>';
@@ -6105,7 +6136,7 @@ function goHtml() {
     '<p class="fine">' + thrNote() + ' Las cifras son las que has anotado tú en Valida.</p>';
 }
 function feedHtml() {
-  if (!LV.hasData()) return '<li><div class="empty">Aún no has anotado resultados. Cuando publiques tu landing y compartas el enlace, apunta en Valida cuántas visitas, registros y encuestas recibes y aparecerán aquí.</div></li>';
+  if (!LV.hasData()) return '<li><div class="empty">Aún no hay resultados. Publica tu landing, comparte el enlace y anota en Valida visitas, registros y encuestas: aparecerán aquí.</div></li>';
   const L = LV.LIVE; const fl = LV.mp().f; const rows = [['eye', '', fl[0], L.V], ['mail', 'acc', fl[1], L.R], ['form', 'ok', fl[2], L.E], ['form', 'ok', fl[3], L.HI], ['euro', 'gold', fl[4], L.PAY]];
   return rows.map((r) => '<li><span class="ic ' + r[1] + '">' + ic(r[0]) + '</span><span class="t"><b>' + esc(r[2]) + '</b> · ' + fmt(r[3]) + '</span><small>' + (L.at ? LV.ago(L.at) : '') + '</small></li>').join('');
 }
@@ -6134,7 +6165,7 @@ LV.onboardHtml = function (ctx) {
   const c = ctx === 'compite', k = '-' + (ctx || 'panel'); // ids distintos por vista: las dos pueden estar dibujadas a la vez
   return '<section class="card onb" aria-labelledby="ob-h' + k + '"><div class="onb-t"><span class="ic">' + ic(c ? 'compite' : 'bolt') + '</span><div>' +
     '<h2 id="ob-h' + k + '">' + (c ? 'Primero cuéntanos tu idea' : LV.mp().ob.h) + '</h2>' +
-    '<p>' + (c ? 'El mercado, la competencia y el plan dependen de lo que ofreces y a quién. Descríbelo en dos líneas y tendrás tu análisis.' : 'Escribe cómo se llama y qué hace. Con eso preparamos tu landing, la encuesta, el mapa de competencia y la ruta de trámites.') + '</p></div></div>' +
+    '<p>' + (c ? 'Mercado, competencia y plan dependen de lo que ofreces y a quién. Descríbelo en dos líneas y tienes tu análisis.' : 'Escribe cómo se llama y qué hace. Con eso preparamos tu landing, la encuesta, el mapa de competencia y los trámites.') + '</p></div></div>' +
     '<form class="onb-f" novalidate>' +
     '<div class="field"><label class="lbl" for="ob-name' + k + '">' + esc(LV.mp().w.name) + '</label><input class="in ob-name" id="ob-name' + k + '" data-bind="idea.name" maxlength="60" autocomplete="off" placeholder="' + esc(LV.mp().w.namePh) + '"></div>' +
     '<div class="field"><label class="lbl" for="ob-pitch' + k + '">' + esc(LV.mp().w.pitch) + '</label><input class="in ob-pitch" id="ob-pitch' + k + '" data-bind="idea.pitch" maxlength="200" autocomplete="off" placeholder="' + esc(LV.mp().w.pitchPh) + '"></div>' +
@@ -6746,13 +6777,13 @@ function assumptions(r) {
   if (d.budget.src === 'supuesto') a.push('un presupuesto de ' + eur(d.budget.v));
   if (!a.length) return '';
   const list = a.length > 1 ? a.slice(0, -1).join(', ') + ' y ' + a[a.length - 1] : a[0];
-  return '<div class="note ex-ass">' + ic('info') + '<span><b class="fg">Hemos supuesto</b> ' + list + '. Si no es así, <button type="button" class="srcl" data-act="in-fix">ajústalo</button> o añade más detalle a tu idea.</span></div>';
+  return '<div class="note ex-ass">' + ic('info') + '<span><b class="fg">Hemos supuesto</b> ' + list + '. ¿No es así? <button type="button" class="srcl" data-act="in-fix">Ajústalo</button> o añade más detalle a tu idea.</span></div>';
 }
 /** Botón del asistente: redacta un resumen en lenguaje llano de este informe. Solo existe si el asistente está en la página. */
 function explainBtn() {
   if (!(LV.agent && LV.agent.on)) return '';
   return '<div class="ex-explain"><button type="button" class="btn ex-explain-b" data-act="agent-explain" data-q="Explicar estos datos de forma sencilla" aria-label="Explicar estos datos de forma sencilla. Astro te lo cuenta en lenguaje llano">' + ic('vmark', 'sm') + '<span>Explicar estos datos de forma sencilla</span></button>' +
-    '<small>Astro, tu mentor, resume qué significan las cifras para tu proyecto y qué conclusiones sacar.</small></div>';
+    '<small>Resumen exprés de Astro: qué significan tus cifras y qué hacer ahora.</small></div>';
 }
 /** Datos del informe actual para el asistente (null si aún no hay análisis propio). */
 function digest() {
@@ -6767,14 +6798,14 @@ function sumHtml(m, M) {
   const cacTxt = a.verdict === 'ok' ? 'Con anuncios sales a cuenta' : a.verdict === 'warn' ? 'Justo: combina canales gratuitos' : 'Apóyate en canales gratuitos';
   const tiles =
     tile('mk', 'Mercado total en España', money(k.tamV), k.clients > 0 ? 'Puedes captar ' + (/^</.test(money(k.som)) ? '' : '≈ ') + money(k.som) + ' el primer año' : 'Indica un presupuesto para estimar tu parte', funnelMini(k), k.tam) +
-    tile('co', 'Competencia', nC + (nC === 1 ? ' rival' : ' rivales'), (rv ? 'El mayor: ' + esc(rv.name) + ' (≈ ' + fn(rv.share, rv.share % 1 ? 1 : 0) + ' %)' : 'Sin rivales directos') + '<br>Tu hueco: precio ' + esc(M.eco.gap.pl) + ', ' + esc(M.eco.gap.sl), shareMini(M)) +
-    (E ? tile('pr', 'Precio de partida', esc(E.priceTxt), esc(E.priceLabel || E.struct) + (E.band ? ' · el mercado cobra ' + esc(E.band.lo) + ' a ' + esc(E.band.hi) : '') + '<br>' + esc(E.model.n) + ' · ' + esc(E.struct), E.tier ? '<span class="chip acc">' + esc(E.tier.l) + '</span>' : '')
+    tile('co', 'Competencia', nC + (nC === 1 ? ' rival' : ' rivales'), (rv ? 'El mayor: ' + esc(rv.name) + ' (≈ ' + fn(rv.share, rv.share % 1 ? 1 : 0) + ' %)' : 'Sin rivales directos') + ' · hueco: precio ' + esc(M.eco.gap.pl) + ', ' + esc(M.eco.gap.sl), shareMini(M)) +
+    (E ? tile('pr', 'Precio de partida', esc(E.priceTxt), esc(E.priceLabel || E.struct) + (E.band ? ' · el mercado cobra ' + esc(E.band.lo) + ' a ' + esc(E.band.hi) : ''), E.tier ? '<span class="chip acc">' + esc(E.tier.l) + '</span>' : '')
       : tile('pr', 'Precio de partida', '—', 'Abre «Precio y público» para elegir tu modelo', '')) +
-    tile('ca', 'Captar un cliente (solo anuncios)', '≈ ' + eur(Math.round(a.cacAds)), 'Máximo sano: ' + eur(a.maxCac) + '<br>' + cacTxt, '<span class="chip ' + a.verdict + '">' + ic(a.verdict === 'ok' ? 'check' : 'alert', 'sm') + (a.verdict === 'ok' ? 'Sale a cuenta' : a.verdict === 'warn' ? 'Justo' : 'Caro') + '</span>', E_('Clic en Google ÷ conversión de la landing ÷ registros que acaban pagando'));
-  const fav = rep.strengths.slice(0, 2).map((s) => '<li>' + ic('check', 'sm') + '<span><b>' + esc(s.t) + '</b><small>' + esc(firstSentence(s.d, 118)) + '</small></span></li>').join('');
-  const frn = M.chain.risks.slice(0, 2).map((x) => '<li>' + ic('alert', 'sm') + '<span><b>' + esc(x.title) + '</b><small>' + esc(firstSentence(x.text, 118)) + '</small></span></li>').join('');
+    tile('ca', 'Captar un cliente (solo anuncios)', '≈ ' + eur(Math.round(a.cacAds)), 'Máximo sano: ' + eur(a.maxCac) + ' · ' + cacTxt, '<span class="chip ' + a.verdict + '">' + ic(a.verdict === 'ok' ? 'check' : 'alert', 'sm') + (a.verdict === 'ok' ? 'Sale a cuenta' : a.verdict === 'warn' ? 'Justo' : 'Caro') + '</span>', E_('Clic en Google ÷ conversión de la landing ÷ registros que acaban pagando'));
+  const fav = rep.strengths.slice(0, 2).map((s) => '<li title="' + esc(firstSentence(s.d, 160)) + '">' + ic('check', 'sm') + '<span><b>' + esc(s.t) + '</b></span></li>').join('');
+  const frn = M.chain.risks.slice(0, 2).map((x) => '<li title="' + esc(firstSentence(x.text, 160)) + '">' + ic('alert', 'sm') + '<span><b>' + esc(x.title) + '</b></span></li>').join('');
   const nxt = M.chain.recs.slice(0, 3).map((c) => '<li><span class="n" aria-hidden="true">' + c.n + '</span><span><b>' + esc(c.t) + '</b><small>' + esc(c.eff) + '</small></span></li>').join('');
-  const reg = rep.sector.id === 'inversion' ? '<div class="note ex-reg">' + ic('shield') + '<span><b class="fg">Ojo regulatorio.</b> Dar recomendaciones personalizadas de inversión o gestionar dinero de terceros es una actividad regulada que exige autorización de la CNMV, y no puedes prometer rentabilidades. Consúltalo con un profesional antes de lanzar: esto es una simulación, no asesoramiento legal ni financiero.</span></div>' : '';
+  const reg = rep.sector.id === 'inversion' ? '<div class="note ex-reg">' + ic('shield') + '<span><b class="fg">Ojo regulatorio.</b> Recomendar inversiones o gestionar dinero ajeno exige autorización de la CNMV, y no puedes prometer rentabilidades. Consúltalo con un profesional antes de lanzar. Esto es una simulación, no asesoramiento legal ni financiero.</span></div>' : '';
   return '<section class="card ex" id="fl-sum" aria-labelledby="fl-sum-t">' +
     '<div class="ex-top"><div class="gauge-w">' + gauge(sc.viab, sc.n ? rep.viab : null, cls) + '</div>' +
     '<div class="ex-hd"><h2 id="fl-sum-t" tabindex="-1">' + esc(rep.name) + '</h2>' +
@@ -6861,7 +6892,7 @@ function adsHtml(M) {
     '<div class="ad-c"><div class="ad-c-h"><span>Coste por cliente solo con anuncios</span><b class="num ' + vcls + '">≈ ' + eur(Math.round(a.cacAds)) + '</b></div>' +
     '<div class="ad-bar" role="img" aria-label="Coste por cliente con anuncios, ' + eur(Math.round(a.cacAds)) + ', frente al máximo sano, ' + eur(a.maxCac) + '"><i class="' + vcls + '" style="width:' + cmpPct.toFixed(0) + '%"></i><span class="thr" style="left:' + thrPct + '%"></span></div>' +
     '<p class="fine" style="margin-top:6px">La marca señala el máximo sano: ' + eur(a.maxCac) + ' (un tercio de lo que vale un cliente, ≈ ' + eur(M.rep.econ.ltv) + '). ' +
-    (vcls === 'ok' ? 'Con anuncios sales a cuenta.' : vcls === 'warn' ? 'Con anuncios sales justo: combina canales gratuitos.' : 'Solo con anuncios no sale a cuenta: apóyate en alianzas, comunidad y boca a boca.') + (a.cacLo < a.cacAds * 0.9 ? ' Con reseñas y clientes que te recomienden bajaría a ≈ ' + eur(Math.round(a.cacLo)) + '.' : '') +
+    (vcls === 'ok' ? 'Con anuncios sales a cuenta.' : vcls === 'warn' ? 'Con anuncios sales justo: combina canales gratuitos.' : 'Solo con anuncios no sale a cuenta. Apóyate en alianzas, comunidad y boca a boca.') + (a.cacLo < a.cacAds * 0.9 ? ' Con reseñas y recomendaciones bajaría a ≈ ' + eur(Math.round(a.cacLo)) + '.' : '') +
     ' Se supone que ' + fn(a.leadCust, 0) + ' de cada 100 registros acaban pagando.</p></div></div></div>';
 }
 function mktHtml(m, M) {
@@ -7217,7 +7248,7 @@ function srcHtml(M) {
     '<p class="fine">Cifra «Publicada»: figura en la fuente con ese valor y ese año. Cifra «Estimada»: la calculamos nosotros con el método indicado. Si una cifra es crítica para decidir, contrástala en la fuente. Datos revisados en ' + esc(LV.MKT.corte) + '.</p>';
 }
 function footHtml() {
-  return '<div class="note fl-foot">' + ic('info') + '<span><b class="fg">Esto es una simulación apoyada en datos de mercado.</b> Mezcla cifras publicadas (con su enlace) y estimaciones (marcadas como tal). No sustituye un estudio de mercado ni el consejo legal, fiscal o financiero. La única forma de confirmar la demanda es validarla con clientes de verdad: usa Valida y Genera.</span></div>';
+  return '<div class="note fl-foot">' + ic('info') + '<span><b class="fg">Simulación con datos de mercado.</b> Mezcla cifras publicadas (con enlace) y estimaciones (marcadas). No sustituye un estudio de mercado ni asesoramiento legal, fiscal o financiero. Para confirmar la demanda, valida con clientes reales: usa Valida y Genera.</span></div>';
 }
 
 // ---------- página: resumen arriba, tarjetas plegables debajo ----------
@@ -7246,7 +7277,7 @@ function cardHtml(c, M) {
 }
 function allOpen() { return CARDS.every((c) => ui.cards[c.id]); }
 function cardsHtml(M) {
-  return '<div class="fc-bar"><h3 id="fc-bar-t">Detalle por áreas</h3><span class="mut">Todo el análisis está aquí; abre solo lo que te interese.</span>' +
+  return '<div class="fc-bar"><h3 id="fc-bar-t">Detalle por áreas</h3><span class="mut">Todo el análisis, por áreas. Abre solo lo que te interese.</span>' +
     '<button class="btn sm ghost" type="button" data-act="fc-all" id="fc-all" aria-pressed="' + allOpen() + '">' + (allOpen() ? 'Plegar todo' : 'Abrir todo') + '</button></div>' +
     '<div class="fc-l">' + CARDS.map((c) => cardHtml(c, M)).join('') + '</div>';
 }
@@ -7266,10 +7297,18 @@ function setCard(id, on) {
   if (on) { ui.cards[id] = true; fillCard(id); if (id === 'chain') requestAnimationFrame(drawLinks); } else delete ui.cards[id];
   syncAll();
 }
-LV.ACT['fc-tog'] = function (el) { setCard(el.dataset.id, !ui.cards[el.dataset.id]); };
+/** Una tarjeta abierta a la vez (informe compacto). «Abrir todo» sigue permitiendo verlas todas. */
+function onlyCard(id) { if (!allOpen()) CARDS.forEach((c) => { if (c.id !== id && ui.cards[c.id]) setCard(c.id, false); }); }
+LV.ACT['fc-tog'] = function (el) {
+  const id = el.dataset.id, on = !ui.cards[id];
+  if (on) onlyCard(id);
+  setCard(id, on);
+  if (on) { const c = $('#fc-' + id); if (c) { try { c.scrollIntoView({ block: 'start', behavior: reduced() ? 'auto' : 'smooth' }); } catch (e) { /* sin desplazamiento */ } } }
+};
 LV.ACT['fc-all'] = function () { const on = !allOpen(); CARDS.forEach((c) => setCard(c.id, on)); };
 function openTo(k) {
   const id = k === 'bo' ? 'chain' : k; if (!$('#fc-' + id)) return;
+  onlyCard(id);
   setCard(id, true);
   const t = k === 'bo' ? $('#fl-bo') : $('#fc-' + id);
   if (t) t.scrollIntoView({ block: 'start', behavior: reduced() ? 'auto' : 'smooth' });
@@ -7398,7 +7437,7 @@ window.addEventListener('resize', () => { clearTimeout(rzT); rzT = setTimeout(()
 
 // al borrar el proyecto se cancela cualquier análisis en marcha y se descarta lo que no se guarda
 function cancel() { clearTimeout(ui.timer); clearTimeout(ui.liveT); ui.run = null; ui.rd = null; ui.edit = false; ui.adj = false; ui.cards = {}; ui.ready = {}; ui.cf = 'all'; ui.open = {}; ui.nodes = {}; ui.add = false; ui.hl = null; }
-LV.inf = { ui, mode, isStale, snapshot, cancel, paint, paintAll, read, digest };
+LV.inf = { ui, mode, isStale, snapshot, cancel, paint, paintAll, read, digest, openTo };
 
 })();
 
@@ -8061,6 +8100,1234 @@ document.addEventListener('click', (e) => { if (modal.open && e.target && e.targ
 })();
 
 /* ============================================================
+   Planes Gratuito / Premium: estado del plan, ventana «Actualizar a Premium», accesos desde el Centro de control y el menú.
+   · Gratuito: todo el flujo de validación (Compite, Genera, Valida, Lanza, Panel Go / No-Go) y Astro, el mentor principal.
+   · Premium: red de agentes especializados por vertical + Comunidad & Validación (muro, feedback, buscador y contactos).
+   · ValidLance es una web estática, sin servidor de cuentas ni pasarela de pago. Por eso:
+       - Con un servidor de cuentas conectado (LV.premium.setProvider) el plan lo decide el servidor tras verificar el pago.
+       - Sin servidor, «Probar Premium» activa una VISTA PREVIA local, sin cobro, para ver y demostrar las funciones.
+       - La app nunca pide ni guarda datos de tarjeta: el pago ocurre siempre en la página de un proveedor externo.
+   · API: LV.premium = { has, plan, isPreview, gate, open, close, config, setProvider, sync, activatePreview, leavePreview, hubHtml, money }
+   ============================================================ */
+(function () {
+'use strict';
+const { $, $$, esc, ic } = LV;
+const S = LV.state;
+
+/* Ajustes del negocio. Se cambian aquí o en tiempo de ejecución con LV.premium.config({ ... }). */
+const CFG = {
+  prices: { month: 9, year: 79 },      // euros. La cuota anual equivale a 6,58 €/mes (un 27 % menos que pagar 12 meses).
+  checkout: { month: '', year: '' },   // enlaces de pago de tu proveedor (Stripe Payment Links, Lemon Squeezy, Paddle…). Vacío = vista previa.
+  portal: '',                          // enlace al portal de cliente del proveedor (cambiar de plan, cancelar, ver facturas)
+};
+let P = null; // proveedor de cuentas: { status(), checkout(cycle), portal() }, todo asíncrono
+LV.hooks.plan = LV.hooks.plan || [];
+
+const plan = () => { if (!S.plan || typeof S.plan !== 'object') S.plan = { tier: 'free', cycle: 'year', preview: false, at: 0 }; return S.plan; };
+const has = () => plan().tier === 'premium';
+const isPreview = () => has() && !!plan().preview;
+const okUrl = (u) => /^https:\/\/[^\s]+$/i.test(String(u || ''));
+const hasCheckout = () => !!(P && P.checkout) || okUrl(CFG.checkout[plan().cycle]);
+const money = (n) => (Math.round(n * 100) / 100).toLocaleString('es-ES', { minimumFractionDigits: n % 1 ? 2 : 0, maximumFractionDigits: 2 }) + ' €';
+const perMonthYear = () => CFG.prices.year / 12;
+const savings = () => { const full = CFG.prices.month * 12, d = full - CFG.prices.year; return { eur: d, pct: Math.round((d / full) * 100) }; };
+
+function changed() {
+  LV.save(); paintChrome();
+  LV.hooks.plan.forEach((f) => { try { f(); } catch (e) { /* un gancho no debe romper el plan */ } });
+  if (!modal().hidden) paint();
+  if (LV.refresh && S.view !== 'hub') { try { LV.refresh(); } catch (e) { /* sin vista */ } }
+  if (S.view === 'hub' && LV.RENDER.hub) LV.RENDER.hub();
+}
+function setTier(t, preview) {
+  const p = plan(); p.tier = t; p.preview = !!preview; p.at = Date.now();
+  if (t !== 'premium' && LV.state.spec) LV.state.spec.active = '';
+  changed();
+}
+
+/* ---------- lo que incluye cada plan (una sola fuente para las tarjetas y la tabla) ---------- */
+const FREE = [
+  'Análisis de competencia y estrategia de precios',
+  'Generador de landings con vista previa y encuesta',
+  'Validación de demanda y veredicto Go / No-Go',
+  'Ruta de trámites y lanzamiento',
+  'Astro, tu mentor principal, en cada pantalla',
+  'Todo parte de cero: sin datos de ejemplo',
+];
+const PRO = [
+  { t: 'Todo lo del plan Gratuito' },
+  { t: 'Red de 5 agentes especializados', k: 'agents', sub: 'SaaS · E-commerce · Servicios · Trading · Formación' },
+  { t: 'Comunidad exclusiva de emprendedores', k: 'community', sub: 'Un hub de networking dentro de ValidLance' },
+  { t: 'Muro de proyectos con tu landing de ValidLance', k: 'community' },
+  { t: 'Feedback y validación de tu mismo sector', k: 'community' },
+  { t: 'Buscador y filtros por sector, etapa y modelo', k: 'community' },
+  { t: 'Contactos con la visibilidad que tú decidas', k: 'community' },
+];
+const ROWS = [ // tabla comparativa: [concepto, gratuito, premium]
+  ['Análisis de competencia y precios', 1, 1], ['Generador de landings y encuesta', 1, 1], ['Validación de demanda y Go / No-Go', 1, 1],
+  ['Ruta de trámites y lanzamiento', 1, 1], ['Astro, mentor principal', 1, 1],
+  ['Agentes especializados por vertical', 0, 1], ['Muro de proyectos', 0, 1], ['Feedback de emprendedores de tu sector', 0, 1],
+  ['Buscador y filtros', 0, 1], ['Contactos y visibilidad', 0, 1],
+];
+const WHY = { agents: 'Desbloquea la red de agentes especializados', community: 'Desbloquea Comunidad & Validación' };
+
+/* ---------- ventana ---------- */
+const modal = () => $('#m-premium');
+let lastFocus = null, pending = null, feature = '';
+
+function sky() { // detalle decorativo: constelación dorada sobre fondo estrellado
+  return '<svg class="pm-sky" viewBox="0 0 640 160" preserveAspectRatio="xMaxYMid slice" aria-hidden="true" focusable="false">' +
+    '<g class="pm-sky-l"><path d="M410 120 470 70 530 96 590 38"/><path d="M470 70 500 24"/><path d="M530 96 560 140"/></g>' +
+    '<g class="pm-sky-d"><circle cx="410" cy="120" r="3"/><circle cx="470" cy="70" r="4"/><circle cx="530" cy="96" r="3"/><circle cx="590" cy="38" r="4.5"/><circle cx="500" cy="24" r="2.5"/><circle cx="560" cy="140" r="2.5"/></g>' +
+    '<g class="pm-sky-s"><circle cx="380" cy="30" r="1.2"/><circle cx="430" cy="50" r="1"/><circle cx="620" cy="110" r="1.2"/><circle cx="350" cy="96" r="1"/><circle cx="520" cy="150" r="1"/><circle cx="600" cy="150" r="1.2"/><circle cx="450" cy="14" r="1"/><circle cx="560" cy="64" r="1"/></g></svg>';
+}
+function agentChips() {
+  const L = LV.spec ? LV.spec.list() : [];
+  return L.map((a) => '<li>' + LV.spec.glyph(a) + '<span><b>' + esc(a.name) + '</b><small>' + esc(a.vert) + '</small></span></li>').join('');
+}
+function ctaHtml() {
+  const c = plan().cycle, price = c === 'year' ? CFG.prices.year : CFG.prices.month, per = c === 'year' ? 'año' : 'mes';
+  if (has() && !isPreview()) {
+    return '<span class="chip ok">' + ic('check', 'sm') + 'Plan activo</span><button class="btn" type="button" data-act="prem-portal">' + ic('ext', 'sm') + 'Gestionar suscripción</button>';
+  }
+  if (isPreview()) {
+    return '<span class="chip gold">' + ic('eye', 'sm') + 'Vista previa activa</span><button class="btn" type="button" data-act="prem-leave">Salir de la vista previa</button>';
+  }
+  if (P && !hasCheckout()) { // conectado a un servidor que no cobra: el plan se consigue con un código
+    return '<span class="chip">' + ic('lock', 'sm') + 'Plan Gratuito</span><span class="pm-for">Premium se activa con un código de acceso que te da quien administra ValidLance. Pégalo abajo, en «¿Tienes un código de acceso?».</span>';
+  }
+  return hasCheckout()
+    ? '<button class="btn pri pm-cta" type="button" data-act="prem-buy">' + ic('star', 'sm') + 'Pasar a Premium · ' + money(price) + ' / ' + per + ic('right', 'sm') + '</button>'
+    : '<button class="btn pri pm-cta" type="button" data-act="prem-preview">' + ic('star', 'sm') + 'Probar Premium en vista previa' + ic('right', 'sm') + '</button>';
+}
+function note() {
+  if (isPreview()) return 'Estás en la vista previa de Premium: no se cobra nada y no se guarda ningún dato de pago. Se queda solo en este navegador.';
+  if (has() && P && !hasCheckout()) return 'Premium está activo con tu código de acceso: el servidor comprueba que sea auténtico y que no haya caducado. ValidLance no guarda datos de pago.';
+  if (has()) return 'Tu suscripción la gestiona tu proveedor de pago; ValidLance no guarda datos de tu tarjeta.';
+  return hasCheckout()
+    ? 'El pago se hace en la página segura de tu proveedor, que muestra el total final con impuestos antes de confirmar. ValidLance no ve ni guarda datos de tu tarjeta.'
+    : 'Sin servidor de pagos conectado, Premium se activa solo como vista previa en este navegador: sin cobro y sin datos de pago. Los precios son orientativos.';
+}
+function view() {
+  const c = plan().cycle, sv = savings(), free = !has();
+  const price = c === 'year' ? perMonthYear() : CFG.prices.month;
+  return '<div class="pm-hero">' + sky() +
+    '<button class="btn ico ghost pm-x" type="button" id="pm-close" data-act="prem-close" aria-label="Cerrar">' + ic('x') + '</button>' +
+    '<span class="pm-kick">' + ic('star', 'sm') + 'ValidLance Premium</span>' +
+    '<h3 id="pm-t">Valida con especialistas y con otros emprendedores</h3>' +
+    '<p id="pm-d">Agentes de IA pensados para tu sector y una comunidad donde enseñar tu proyecto, recibir opiniones de verdad y conocer a quien te puede ayudar.</p>' +
+    (feature && WHY[feature] ? '<p class="pm-why">' + ic('lock', 'sm') + '<span>' + esc(WHY[feature]) + '</span></p>' : '') + '</div>' +
+    '<div class="pm-bill"><div class="seg" role="group" aria-label="Periodo de facturación">' +
+      '<button type="button" data-act="prem-cycle" data-c="month" aria-pressed="' + (c === 'month') + '">Mensual</button>' +
+      '<button type="button" data-act="prem-cycle" data-c="year" aria-pressed="' + (c === 'year') + '">Anual<span class="pm-pill">−' + sv.pct + ' %</span></button></div>' +
+      '<span class="pm-save">' + (c === 'year' ? 'Ahorras ' + money(sv.eur) + ' al año frente al pago mensual' : 'Con el plan anual ahorras ' + money(sv.eur) + ' al año') + '</span></div>' +
+    '<div class="pm-plans">' +
+      '<section class="pm-plan" aria-labelledby="pm-f-t"><header><h4 id="pm-f-t">Gratuito</h4>' + (free ? '<span class="chip">Tu plan actual</span>' : '') + '</header>' +
+        '<p class="pm-price"><b>0 €</b><span>para siempre</span></p><p class="pm-for">Todo lo esencial para validar tu idea, con Astro de mentor.</p>' +
+        '<ul class="pm-list">' + FREE.map((t) => '<li>' + ic('check', 'sm') + '<span>' + esc(t) + '</span></li>').join('') + '</ul></section>' +
+      '<section class="pm-plan pro" aria-labelledby="pm-p-t"><header><h4 id="pm-p-t">Premium</h4><span class="chip gold">' + ic('star', 'sm') + 'Recomendado</span></header>' +
+        '<p class="pm-price"><b>' + money(price) + '</b><span>al mes' + (c === 'year' ? ' · ' + money(CFG.prices.year) + ' al año' : '') + '</span></p>' +
+        '<p class="pm-for">Todo lo Gratuito, más especialistas y comunidad.</p>' +
+        '<ul class="pm-list">' + PRO.map((x, i) => '<li' + (x.k ? ' data-k="' + x.k + '"' : '') + (x.k && x.k === feature && PRO.findIndex((y) => y.k === x.k) === i ? ' class="hl"' : '') + '>' + ic('check', 'sm') + '<span>' + esc(x.t) + (x.sub ? '<small>' + esc(x.sub) + '</small>' : '') + '</span></li>').join('') + '</ul>' +
+        '<div class="pm-act">' + ctaHtml() + '</div></section></div>' +
+    '<div class="pm-net"><h4>' + ic('hub', 'sm') + 'La red de agentes que se desbloquea</h4><ul>' + agentChips() + '</ul></div>' +
+    '<details class="pm-cmp"><summary>Comparar los dos planes</summary><div class="pm-tw"><table><caption class="sr">Comparativa de planes</caption><thead><tr><th scope="col">Función</th><th scope="col">Gratuito</th><th scope="col">Premium</th></tr></thead><tbody>' +
+      ROWS.map((r) => '<tr><th scope="row">' + esc(r[0]) + '</th>' + [r[1], r[2]].map((v) => '<td>' + (v ? ic('check', 'sm') + '<span class="sr">Incluido</span>' : '<span aria-hidden="true">—</span><span class="sr">No incluido</span>') + '</td>').join('') + '</tr>').join('') +
+    '</tbody></table></div></details>' +
+    (LV.remote ? LV.remote.cardHtml() : '') +
+    '<p class="fine pm-fine">' + esc(note()) + '</p>';
+}
+function paint() {
+  const m = modal(); if (!m) return;
+  const keep = m.querySelector('.pm-cmp'), open = keep && keep.open, sc = $('#pm-c', m).scrollTop;
+  $('#pm-c', m).innerHTML = view();
+  if (open) m.querySelector('.pm-cmp').open = true;
+  $('#pm-c', m).scrollTop = sc;
+}
+function open(f, opts) {
+  const m = modal(); if (!m) return;
+  feature = f || ''; pending = f ? { f: f, o: opts || {} } : null;
+  lastFocus = document.activeElement; paint(); m.hidden = false;
+  setTimeout(() => {
+    const hl = $('.pm-list .hl', m); if (hl && hl.scrollIntoView) { try { hl.scrollIntoView({ block: 'nearest' }); } catch (e) { /* sin desplazamiento */ } }
+    const b = $('.pm-cta', m) || $('#pm-close', m); if (b) b.focus();
+  }, 40);
+}
+function close() {
+  const m = modal(); if (!m || m.hidden) return;
+  m.hidden = true; feature = '';
+  if (lastFocus && lastFocus.focus && document.contains(lastFocus)) { try { lastFocus.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } }
+  lastFocus = null;
+}
+/** Puerta de las funciones Premium: devuelve true si se puede entrar; si no, abre la ventana de planes y guarda a dónde ir después. */
+function gate(f, opts) { if (has()) return true; open(f, opts); return false; }
+/** Tras activar el plan, se continúa con lo que la persona quería abrir. */
+function proceed() {
+  const p = pending; pending = null; if (!p) return;
+  if (p.f === 'community') LV.go('comunidad');
+  else if (p.f === 'agents') { if (p.o && p.o.agent && LV.spec) LV.spec.use(p.o.agent); else if (LV.spec) LV.spec.openAgents(); }
+}
+
+/* ---------- acciones ---------- */
+function activatePreview() {
+  if (P) { LV.toast('Con un servidor de cuentas conectado, el plan lo decide el servidor', 'info'); return; }
+  setTier('premium', true); LV.toast('Vista previa de Premium activada · sin cobro', 'star'); close(); proceed();
+}
+function leavePreview() { if (!isPreview()) return; setTier('free', false); LV.toast('Has vuelto al plan Gratuito', 'check'); }
+async function buy() {
+  const c = plan().cycle;
+  try {
+    if (P && P.checkout) {
+      const r = await P.checkout(c);
+      if (r && okUrl(r.url)) { window.open(r.url, '_blank', 'noopener'); LV.toast('Se ha abierto la página de pago en otra pestaña', 'ext'); }
+      else if (r && r.tier === 'premium') { setTier('premium', false); LV.toast('Plan Premium activado', 'star'); close(); proceed(); }
+      return;
+    }
+    if (okUrl(CFG.checkout[c])) { window.open(CFG.checkout[c], '_blank', 'noopener'); LV.toast('Se ha abierto la página de pago en otra pestaña', 'ext'); }
+    else LV.toast('Todavía no hay pasarela de pago conectada. Si tienes un código de acceso, pégalo en esta ventana.', 'info');
+  } catch (e) { LV.toast('No se pudo iniciar el pago. Inténtalo de nuevo.', 'alert'); }
+}
+async function portal() {
+  try {
+    let u = CFG.portal;
+    if (P && P.portal) { const r = await P.portal(); if (r && r.url) u = r.url; }
+    if (okUrl(u)) window.open(u, '_blank', 'noopener'); else LV.toast('Gestiónala desde el recibo o el correo de tu proveedor de pago', 'info');
+  } catch (e) { LV.toast('No se pudo abrir el portal de la suscripción', 'alert'); }
+}
+/** Pide al servidor de cuentas el plan real (tras iniciar sesión o volver de la página de pago). */
+async function sync() {
+  if (!P || !P.status) return null;
+  try {
+    const r = await P.status(); if (!r) return null;
+    const t = r.tier === 'premium' ? 'premium' : 'free';
+    if (t !== plan().tier || plan().preview) setTier(t, false);
+    return t;
+  } catch (e) { return null; }
+}
+LV.ACT['prem-open'] = function () { open(''); };
+LV.ACT['prem-close'] = function () { close(); };
+LV.ACT['prem-cycle'] = function (el) { plan().cycle = el.dataset.c === 'month' ? 'month' : 'year'; LV.save(); paint(); const b = $('[data-act="prem-cycle"][data-c="' + plan().cycle + '"]', modal()); if (b) b.focus({ preventScroll: true }); };
+LV.ACT['prem-preview'] = function () { activatePreview(); };
+LV.ACT['prem-leave'] = function () { leavePreview(); };
+LV.ACT['prem-buy'] = function () { buy(); };
+LV.ACT['prem-portal'] = function () { portal(); };
+LV.ACT['menu-plan'] = function () { const mu = $('#menu-user'); if (mu && !mu.hidden) { mu.hidden = true; const b = $('#btn-user'); if (b) b.setAttribute('aria-expanded', 'false'); } open(''); };
+LV.ACT['com-open'] = function () { if (gate('community')) LV.go('comunidad'); else if (LV.go) { /* la ventana de planes ya está abierta */ } };
+
+document.addEventListener('keydown', (e) => {
+  const m = modal(); if (!m || m.hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); close(); return; }
+  if (e.key === 'Tab') {
+    const f = $$('button:not([disabled]),a[href],summary,input,select,textarea,[tabindex]:not([tabindex="-1"])', m).filter((x) => x.offsetParent !== null);
+    if (!f.length) return; const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+document.addEventListener('click', (e) => { const m = modal(); if (m && !m.hidden && e.target === m) close(); });
+
+/* ---------- menú de cuenta y barra lateral ---------- */
+function paintChrome() {
+  const s = $('#menu-plan-s'); if (s) s.textContent = has() ? (isPreview() ? 'Premium · vista previa' : 'Premium') : 'Gratuito';
+  const t = $('#menu-plan-t'); if (t) t.textContent = has() ? 'Mi plan' : 'Pasar a Premium';
+  const pc = $('#pc-comunidad'); if (pc) { pc.innerHTML = has() ? '' : ic('lock', 'sm'); pc.setAttribute('aria-label', has() ? '' : 'Premium'); pc.title = has() ? '' : 'Incluido en Premium'; }
+}
+
+/* ---------- Centro de control: sección «Comunidad & Validación» y red de agentes ---------- */
+function hubHtml() {
+  const on = has(), mine = LV.spec && LV.spec.forModel();
+  const F = [['board', 'Muro de proyectos', 'Publica tu proyecto con la landing que generaste en ValidLance.'], ['msg', 'Validación y feedback', 'Opiniones y métricas iniciales de emprendedores de tu mismo sector.'],
+    ['search', 'Buscador y filtros', 'Encuentra proyectos y personas por sector, etapa y modelo de negocio.'], ['link', 'Contactos a tu medida', 'Tú decides quién te ve y quién puede pedirte contacto.']];
+  const ag = LV.spec ? LV.spec.list().map((a) => '<li><button class="hub-ag-b' + (mine && mine.id === a.id ? ' mine' : '') + '" type="button" data-act="spec-use" data-id="' + a.id + '" aria-label="' + esc(a.name + ', agente de ' + a.vert + (on ? '' : '. Premium') + (mine && mine.id === a.id ? '. Tu sector' : '')) + '">' +
+    LV.spec.glyph(a) + '<span><b>' + esc(a.name) + '</b><small>' + esc(a.short || a.vert) + '</small></span>' + (on ? '' : ic('lock', 'sm hub-ag-k')) + '</button></li>').join('') : '';
+  return '<section class="hub-pro" aria-labelledby="hp-t">' +
+    '<div class="hub-pro-top"><div class="hub-pro-t"><span class="chip ' + (on ? 'ok' : 'gold') + '">' + ic(on ? 'check' : 'lock', 'sm') + (on ? 'Premium activo' + (isPreview() ? ' · vista previa' : '') : 'Premium') + '</span>' +
+      '<h3 id="hp-t">Comunidad &amp; Validación</h3><p>Un hub de emprendedores dentro de ValidLance: enseña tu proyecto, consigue validación real de gente de tu sector y conecta con quien te interese.</p></div>' +
+      '<div class="hub-pro-a"><button class="btn pri" type="button" data-act="com-open">' + ic(on ? 'right' : 'lock', 'sm') + (on ? 'Abrir la comunidad' : 'Desbloquear con Premium') + '</button>' +
+      '<button class="btn ghost" type="button" data-act="prem-open">' + (on ? 'Mi plan' : 'Ver planes y precios') + '</button></div></div>' +
+    '<ul class="hub-pro-f">' + F.map((f) => '<li><span class="hub-pro-ic">' + ic(f[0]) + '</span><span><b>' + f[1] + '</b><small>' + f[2] + '</small></span></li>').join('') + '</ul>' +
+    '<div class="hub-ag"><div class="hub-ag-h"><div><b>Red de agentes especializados</b><span>' + (on ? 'Elige uno y se abre el chat con su guía.' : 'Un agente por sector, con las guías de su vertical.') + '</span></div>' +
+      '<button class="btn sm ghost" type="button" data-act="agents-open">Ver la red completa</button></div><ul class="hub-ag-l">' + ag + '</ul></div></section>';
+}
+
+LV.premium = {
+  has: has, plan: plan, isPreview: isPreview, gate: gate, open: open, close: close, sync: sync, proceed: proceed,
+  activatePreview: activatePreview, leavePreview: leavePreview, hubHtml: hubHtml, money: money,
+  force: setTier, repaint: function () { if (modal() && !modal().hidden) paint(); },
+  config: function (o) {
+    o = o || {};
+    if (o.prices) { if (Number(o.prices.month) > 0) CFG.prices.month = Number(o.prices.month); if (Number(o.prices.year) > 0) CFG.prices.year = Number(o.prices.year); }
+    if (o.checkout) { ['month', 'year'].forEach((k) => { if (o.checkout[k] == null) return; CFG.checkout[k] = okUrl(o.checkout[k]) ? String(o.checkout[k]) : ''; }); }
+    if (o.portal != null) CFG.portal = okUrl(o.portal) ? String(o.portal) : '';
+    if (!modal().hidden) paint();
+    return JSON.parse(JSON.stringify(CFG));
+  },
+  /** Conecta tu servidor de cuentas: { status(): {tier}, checkout(cycle): {url} | {tier}, portal(): {url} } */
+  setProvider: function (p) { P = p && typeof p === 'object' ? p : null; if (P && isPreview()) setTier('free', false); return P ? sync() : null; },
+  price: () => JSON.parse(JSON.stringify(CFG.prices)),
+};
+paintChrome();
+})();
+
+/* ============================================================
+   Red de agentes especializados (Premium): un agente por vertical, con su guía propia.
+   · Lyra (SaaS), Vega (E-commerce), Sirio (Servicios), Orión (Trading y finanzas) y Andrómeda (Formación e infoproductos).
+   · Son agentes VIRTUALES basados en guías y reglas de su sector (los mismos mecanismos que Astro); con «IA con tu proyecto» activada
+     se envía además la guía del agente como documento al servidor RAG de la persona. No usan datos de mercado en tiempo real
+     y no dan asesoramiento legal ni financiero. Cada respuesta se completa con las cifras reales que la persona haya anotado.
+   · Astro sigue siendo el mentor principal de todos los planes: cuando un agente no tiene tema para la pregunta, responde Astro.
+   · API: LV.spec = { list, get, forModel, active, use, off, reply, docs, openAgents, intro }
+   ============================================================ */
+(function () {
+'use strict';
+const { $, $$, esc, ic } = LV;
+const S = LV.state;
+
+const J = function () { return Array.prototype.filter.call(arguments, Boolean).join('\n\n'); };
+const B = (a) => a.map((x) => '- ' + x).join('\n');
+const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9ñ\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+/* Temas comunes a todos los agentes. Cada uno lleva sus palabras clave (sin tildes) y su respuesta por vertical. */
+const TOPICS = [
+  { id: 'val', t: 'Cómo validar', kw: ['validar', 'validacion', 'valido', 'demanda', 'comprobar', 'hay mercado', 'antes de construir', 'antes de invertir', 'preventa', 'pre venta', 'funcionara', 'funciona mi idea', 'merece la pena'] },
+  { id: 'precio', t: 'Precio y cobro', kw: ['precio', 'precios', 'cobrar', 'cobro', 'tarifa', 'cuota', 'suscripcion', 'monetiz', 'cuanto cobro', 'margen', 'ingresos', 'plan de pago', 'tarifas'] },
+  { id: 'canal', t: 'Primeros clientes', kw: ['clientes', 'captar', 'captacion', 'conseguir', 'marketing', 'publicidad', 'anuncios', 'canal', 'canales', 'vender', 'trafico', 'primeros usuarios', 'adquisicion', 'promocion', 'difusion'] },
+  { id: 'metricas', t: 'Métricas clave', kw: ['metrica', 'metricas', 'kpi', 'conversion', 'churn', 'ltv', 'cac', 'indicador', 'indicadores', 'medir', 'cifras', 'numeros que'] },
+  { id: 'riesgos', t: 'Errores y riesgos', kw: ['riesgo', 'riesgos', 'errores', 'error tipico', 'fallo', 'peligro', 'cuidado', 'evitar', 'fracasan', 'fracaso', 'que puede salir mal'] },
+  { id: 'legal', t: 'Legal y trámites', kw: ['legal', 'ley', 'leyes', 'rgpd', 'privacidad', 'tramite', 'tramites', 'autonomo', 'sociedad', 'impuesto', 'iva', 'cnmv', 'terminos', 'condiciones', 'devolucion', 'desistimiento', 'garantia', 'factura', 'licencia', 'contrato', 'regulacion'] },
+  { id: 'plan30', t: 'Plan de 30 días', kw: ['plan de 30', '30 dias', 'un mes', 'hoja de ruta', 'por donde empiezo', 'por donde empezar', 'primeros pasos', 'siguiente paso', 'que hago primero', 'semanas', 'plan de accion', 'plan paso'] },
+];
+const MENU_KW = ['que sabes', 'que puedes', 'que haces', 'en que me ayudas', 'en que me puedes', 'temas', 'que ofreces', 'de que hablamos', 'que me ofreces'];
+
+/* Cada agente: identidad, constelación (puntos y líneas del dibujo), qué cubre y su guía por tema. */
+const AGENTS = [
+  { id: 'saas', name: 'Lyra', vert: 'SaaS y apps web', short: 'SaaS', lc: 'SaaS y apps web', ico: 'm-saas', models: ['saas'],
+    tag: 'Software por suscripción', pts: [[20, 5], [11, 15], [29, 15], [14, 31], [26, 31], [20, 22]], ln: [[0, 1], [0, 2], [1, 3], [2, 4], [3, 4], [1, 5], [2, 5]],
+    covers: ['Validar antes de programar', 'Precio por plan o puesto', 'Activación, baja mensual y CAC/LTV', 'RGPD, cookies e IVA digital'],
+    g: {
+      val: ['En software, validar no es programar: es comprobar que alguien **paga por quitarse el problema**.', B(['Describe el problema en una frase y habla con **10 personas** que lo sufran: cómo lo resuelven hoy y cuánto les cuesta (tiempo o dinero).', 'Publica una **landing con lista de espera y el precio a la vista** (Genera y Valida lo hacen).', 'Pide un **compromiso real** antes de programar: reserva, preventa o carta de intención.', 'Enseña un **prototipo** (Figma o un vídeo del flujo), no código.']), 'Un «me parece buena idea» no es validación; un pago o un compromiso sí.'],
+      precio: ['El precio por plan o por puesto debe seguir **el valor que recibe el cliente**, no tus costes.', B(['Cobra **por puesto** si el valor crece con el equipo y **por uso** si varía mucho de un cliente a otro.', 'Máximo **3 planes** y que el del medio sea el que quieres vender.', 'Ofrece **plan anual con descuento**: mejora la caja y reduce las bajas.', 'Un plan gratuito solo si servir a un usuario gratis te cuesta poco y hay un camino claro hacia el pago.', 'Si usas IA o infraestructura cara, comprueba que **el coste por usuario** queda por debajo de lo que paga.']), 'Pregunta el precio en la encuesta de Valida: «¿a partir de qué precio sería caro?».'],
+      canal: ['Los primeros 10 a 50 usuarios se consiguen **a mano**:', B(['**Comunidades** donde ya se habla del problema (foros, Slack, Discord, grupos).', '**Mensajes 1 a 1** personalizados a quien encaja con tu cliente ideal.', '**Contenido útil** que resuelva una parte del problema: tutoriales, plantillas, comparativas honestas.', '**Alianzas** con herramientas complementarias y directorios de lanzamientos.']), 'La publicidad de pago llega después, cuando conoces tu conversión y tu coste por cliente (Compite lo calcula con tus cifras).'],
+      metricas: ['Tres capas, en este orden:', B(['**Validación:** visitas que se apuntan, intención alta y disposición a pagar (los criterios de Valida).', '**Producto:** activación (llegar al primer valor) y retención; la **baja mensual (churn)** manda sobre todo lo demás.', '**Negocio:** ingresos recurrentes mensuales, CAC y LTV.']), 'Regla práctica, orientativa: LTV de al menos 3 veces el CAC y recuperar el CAC en menos de un año.'],
+      riesgos: ['Los fallos más repetidos en software:', B(['**Construir antes de validar** y descubrir tarde que nadie paga.', 'Resolver un problema que **molesta pero no duele**.', 'Cobrar **demasiado poco** y no poder sostener el soporte.', 'Llenar el producto de funciones (**funcionalitis**) en vez de pulir la primera que da valor.', 'Depender de **un único canal** o de una sola API de terceros.']), 'Mira también el apartado de riesgos de tu informe en Compite.'],
+      legal: ['Lo que suele tocar a un SaaS en España y la UE (consúltalo con un profesional):', B(['**RGPD:** base legal, política de privacidad, contratos con proveedores que tratan datos (hosting, email) y derechos de las personas usuarias.', '**Cookies (LSSI-CE):** consentimiento previo para las no esenciales.', '**Términos del servicio** y condiciones de pago y baja.', '**Facturación e IVA:** el IVA de servicios digitales a consumidores de la UE depende del país del cliente (ventanilla única OSS).', '**Licencias** de las librerías de código abierto que uses.']), 'No es asesoramiento legal.'],
+      plan30: ['Un mes para decidir si programar:', B(['**Semana 1:** entrevistas con 10 personas y el problema escrito en una frase.', '**Semana 2:** landing, lista de espera y primera encuesta (Genera y Valida).', '**Semana 3:** llamadas con quien se apuntó, precio en la encuesta y una preventa.', '**Semana 4:** decide con el panel Go / No-Go: MVP mínimo, más validación o cambio de rumbo.'])],
+    } },
+  { id: 'shop', name: 'Vega', vert: 'E-commerce', short: 'E-commerce', lc: 'e-commerce', ico: 'm-shop', models: ['shop'],
+    tag: 'Tienda y producto físico', pts: [[20, 20], [20, 6], [33, 20], [20, 34], [7, 20]], ln: [[0, 1], [0, 2], [0, 3], [0, 4]],
+    covers: ['Probar un producto sin comprar stock', 'Margen real por pedido', 'Canales y coste por pedido', 'Desistimiento, garantía e IVA'],
+    g: {
+      val: ['Antes de comprar stock, **comprueba que la gente deja dinero o datos por el producto**.', B(['Crea una **landing del producto** con foto o maqueta, precio y botón de «avísame» o preventa.', 'Mueve un **tráfico pequeño y con tope de gasto** para medir cuántos pasan del clic al interés.', 'Pide **muestras** al proveedor y pruébalas con 5 a 10 personas reales.', 'Compara **precio, reseñas y envío** con los rivales directos.']), 'Buena señal: gente que deja su email y, de ellas, una parte que acepta pagar un adelanto.'],
+      precio: ['Todo empieza por el **margen por pedido**:', B(['Precio − coste del producto − envío − comisión de pasarela o marketplace − devoluciones previstas − **publicidad por pedido**.', 'Si lo que queda es poco, **no escala** aunque vendas mucho.', 'Sube el **ticket medio** con packs, complementos y envío gratis a partir de cierto importe.', 'Prueba el precio en la encuesta antes de fijar el stock.']), 'Compite te calcula cuántos clientes necesitas para cubrir costes con tus cifras.'],
+      canal: ['En tienda online conviene **un canal a la vez**:', B(['**Marketplaces** (según producto) para empezar con tráfico ya existente.', '**Contenido de uso** en redes: ver el producto en acción vende.', '**Email:** convierte la lista de espera en tus primeras ventas.', '**SEO** de producto y categoría, que da frutos a medio plazo.', '**Microinfluencers** con producto a cambio, siempre con la colaboración claramente indicada.']), 'Anuncios de pago solo cuando conozcas tu margen y tu coste por pedido.'],
+      metricas: ['Las cifras que importan en una tienda:', B(['**Conversión** de la tienda y **ticket medio**.', '**Coste de adquisición por pedido** frente al margen de ese pedido.', '**Tasa de devolución** y **recompra**.', '**Rotación del stock:** cuánto tarda en venderse lo que compras.']), 'Regla práctica, orientativa: el coste de conseguir un cliente debería quedar por debajo del margen de su primer pedido o recuperarse con la recompra.'],
+      riesgos: ['Donde más se pierde dinero:', B(['**Stock parado** por comprar demasiado pronto.', 'Depender de **un solo proveedor**.', 'Márgenes comidos por **logística y devoluciones**.', 'Plazos de envío que no cumples.', 'Producto **sin diferenciación**: solo compites en precio.', 'Reseñas falsas o incentivadas sin avisar: están prohibidas.']), 'Empieza con el pedido mínimo posible.'],
+      legal: ['Lo básico de la venta online en España y la UE (consúltalo con un profesional):', B(['**Información precontractual** y condiciones de venta claras.', '**Desistimiento:** 14 días en ventas a distancia, con excepciones.', '**Garantía legal** de conformidad: 3 años para bienes nuevos en España.', 'Precios **con IVA** y gastos de envío a la vista; IVA de ventas a otros países de la UE (ventanilla única OSS).', '**RGPD y cookies** en la tienda.', 'Seguridad y etiquetado del producto (marcado CE si corresponde).']), 'No es asesoramiento legal.'],
+      plan30: ['Un mes para decidir si compras stock:', B(['**Semana 1:** producto, proveedor y cuentas de margen por pedido.', '**Semana 2:** landing con preventa o «avísame» y encuesta.', '**Semana 3:** tráfico pequeño, muestras a 5 o 10 personas y ajuste del precio.', '**Semana 4:** decide con el panel Go / No-Go: primer pedido pequeño, más pruebas o cambio de producto.'])],
+    } },
+  { id: 'serv', name: 'Sirio', vert: 'Servicios y freelance', short: 'Servicios', lc: 'servicios y freelance', ico: 'm-serv', models: ['serv'],
+    tag: 'Consultoría, agencia, marca personal', pts: [[12, 20], [28, 14], [30, 30], [20, 8]], ln: [[0, 1], [0, 2], [1, 3]],
+    covers: ['Vender antes de crear', 'Tarifa por proyecto o retainer', 'Referidos y alianzas', 'Autónomo, facturas y contrato'],
+    g: {
+      val: ['En servicios se valida **vendiendo**, no preparando.', B(['Define **una oferta clara**: resultado, plazo y precio.', 'Haz una **landing con esa oferta** y 10 conversaciones con clientes posibles.', 'Busca **3 ventas o pilotos a precio real** (un piloto con descuento a cambio de testimonio vale).', 'Limita las plazas: «este mes tengo 3», si es verdad.']), 'Si nadie compra la oferta clara, el problema no es el marketing: es la oferta.'],
+      precio: ['Tu tiempo es el límite del negocio:', B(['Calcula la **tarifa por hora objetivo**: ingresos que quieres + costes + impuestos + vacaciones, **entre las horas realmente facturables** (no lo son todas).', 'Pasa de precio por hora a **precio por proyecto o paquete**: cobras por el resultado.', 'Ofrece un **retainer mensual** para tener ingresos recurrentes.', 'Sube precios cuando tengas lista de espera.']), 'Pide siempre un **anticipo** y fija el alcance por escrito.'],
+      canal: ['Los primeros clientes de un servicio suelen llegar así:', B(['**Tu red y los referidos:** pide una recomendación al cerrar cada proyecto.', '**Contenido** que muestre tu método (LinkedIn, newsletter) y casos de estudio.', '**Alianzas** con quien vende algo complementario.', '**Mensajes directos** con una propuesta concreta, no un «¿hablamos?».', 'Las plataformas de freelance sirven para empezar, pero compiten por precio.']), 'Un cliente satisfecho es tu mejor canal.'],
+      metricas: ['Para un negocio de servicios:', B(['**Ingreso real por hora** (incluye lo que no facturas).', '**Tasa de cierre** de propuestas y duración del ciclo de venta.', '**Concentración:** qué parte de tus ingresos depende del mayor cliente.', '**Recurrencia:** cuánto de lo que ingresas se repite cada mes.']), 'Si un cliente supera la mitad de tus ingresos, eso es un riesgo, no un éxito.'],
+      riesgos: ['Lo que más se repite:', B(['Depender de **uno o dos clientes**.', 'Cobrar por horas **sin límite de alcance** (el trabajo crece, el pago no).', 'No pedir **anticipo** ni firmar contrato.', '**Cobrar de menos** por miedo y acabar sin tiempo para vender.', 'No reservar horas para **captar** clientes.']), 'Pon por escrito entregables, plazos y número de revisiones.'],
+      legal: ['Lo habitual para freelance en España (consúltalo con una gestoría):', B(['**Alta de autónomo** (o sociedad) y epígrafe de actividad.', '**Facturas** con sus requisitos; IVA e IRPF trimestrales.', '**Contrato de servicios** con alcance, plazos de pago y propiedad intelectual de los entregables.', '**Confidencialidad** si accedes a información del cliente.', '**RGPD** si tratas datos personales de sus clientes.', 'Seguro de responsabilidad civil si tu trabajo puede causar daños.']), 'No es asesoramiento legal.'],
+      plan30: ['Un mes para tener tus primeros clientes:', B(['**Semana 1:** oferta clara (resultado, plazo, precio) y lista de 30 clientes posibles.', '**Semana 2:** landing, mensajes directos y 10 conversaciones.', '**Semana 3:** propuestas con anticipo y alcance por escrito.', '**Semana 4:** revisa tu tasa de cierre y decide con el panel Go / No-Go.'])],
+    } },
+  { id: 'trade', name: 'Orión', vert: 'Trading y finanzas', short: 'Trading', lc: 'trading y finanzas', ico: 'm-trade', models: ['trade'],
+    tag: 'Formación, herramientas y comunidades', pts: [[9, 8], [31, 8], [15, 20], [20, 20], [25, 20], [10, 33], [30, 33]], ln: [[0, 2], [1, 4], [2, 3], [3, 4], [2, 5], [4, 6]],
+    covers: ['Formación frente a asesoramiento', 'Cuotas sin promesas de rentabilidad', 'Retención y reclamaciones', 'CNMV y publicidad financiera'],
+    g: {
+      val: ['En finanzas la **confianza** pesa más que el producto. Antes de nada, aclara qué vendes:', B(['**Formación o información general**, **herramienta**, o **asesoramiento / gestión**: no son lo mismo y las reglas cambian mucho.', 'Landing **sin promesas de rentabilidad**, con lista de acceso y perfil de inversor en la encuesta.', 'Prueba con una **comunidad pequeña** y mide cuánta gente se queda antes de cobrar.', 'La muestra mínima es mayor en este modelo: Valida lo tiene en cuenta.']), 'Si no gestionas dinero de nadie, dilo claramente en tu web.'],
+      precio: ['Opciones habituales de cobro:', B(['**Cuota mensual** de comunidad o formación.', '**Pago único** por un curso.', '**Suscripción** por una herramienta o un bot de alertas.', 'Evita cobrar un **porcentaje de beneficios** si no estás autorizado a gestionar capital.', 'Explica con total transparencia **qué incluye** la cuota.']), 'Ancla el precio en el valor educativo o de la herramienta, nunca en la rentabilidad.'],
+      canal: ['Lo que construye confianza:', B(['**Contenido educativo honesto**, incluidas las operaciones perdedoras.', '**Comunidades** y canales propios (YouTube, newsletter, Telegram) con avisos de riesgo visibles.', '**Alianzas y afiliación** con terceros, declarando siempre el conflicto de interés.', 'Evita a quien promete «ingresos fáciles»: arrastra tu reputación.']), 'En este sector una sola captación engañosa puede cerrar el negocio.'],
+      metricas: ['Para una comunidad o herramienta financiera:', B(['**Retención:** bajas por mes.', '**Solicitudes de acceso** que acaban en pago.', '**Reembolsos y reclamaciones.**', '**Satisfacción** de quien paga (una encuesta corta cada trimestre).']), 'No publiques resultados de terceros como si fueran una promesa.'],
+      riesgos: ['Lo más delicado:', B(['**Prometer o insinuar rentabilidades.**', 'Mostrar **resultados pasados** sin contexto ni advertencia.', 'Dar **recomendaciones personalizadas** sin autorización.', 'Enlaces de afiliado sin avisar de que lo son.', 'Si tocas **criptoactivos**, revisa su propio marco regulatorio.']), 'Ten una advertencia de riesgo visible en la landing y en el canal.'],
+      legal: ['Esto es lo que hay que mirar antes de captar clientes (consulta con un abogado financiero):', B(['**CNMV:** el asesoramiento personalizado y la gestión de carteras son actividades reguladas que requieren autorización.', 'La **publicidad** de servicios de inversión está sujeta a normas de claridad y advertencias.', '**Formación e información general** tienen más margen, pero con límites claros.', '**RGPD** y condiciones de contratación.']), 'ValidLance no es asesoramiento legal ni financiero.'],
+      plan30: ['Un mes para probar tu propuesta con prudencia:', B(['**Semana 1:** define qué vendes (formación, herramienta o servicio) y revisa si necesita autorización.', '**Semana 2:** landing con descargo de riesgos, lista de acceso y encuesta.', '**Semana 3:** comunidad pequeña y mide la retención.', '**Semana 4:** decide con el panel Go / No-Go, con la muestra mínima del modelo.'])],
+    } },
+  { id: 'info', name: 'Andrómeda', vert: 'Formación e infoproductos', short: 'Formación', lc: 'formación e infoproductos', ico: 'm-info', models: ['info', 'crea'],
+    tag: 'Cursos, comunidades y contenido', pts: [[5, 28], [14, 21], [22, 22], [29, 14], [35, 7]], ln: [[0, 1], [1, 2], [2, 3], [3, 4]],
+    covers: ['Preventa antes de grabar', 'Escalera de valor y precio', 'Lista de correo y lanzamientos', 'Desistimiento en contenido digital'],
+    g: {
+      val: ['La regla del infoproducto: **vende antes de grabar**.', B(['Una página con **programa, resultado realista, fecha y precio**.', 'Una **lista de espera** y una clase o taller gratuito para medir interés.', 'Una **mini-versión de pago** (taller pequeño) para comprobar que compran.', 'Ofrece a 5 clientes ideales una **plaza fundadora**.']), 'Cuentan las compras de la preventa, no las personas apuntadas.'],
+      precio: ['El precio sigue **el resultado**, no las horas de vídeo:', B(['Piensa en una **escalera de valor:** contenido gratuito → producto de entrada → programa principal → comunidad o mentoría.', 'Un **precio de lanzamiento** limitado, solo si de verdad lo es.', 'Una **garantía de devolución** razonable reduce la fricción.', 'Elige entre **pago único** (curso) y **suscripción** (comunidad).']), 'Prueba cuánto pagaría tu público en la encuesta de Valida.'],
+      canal: ['Una audiencia propia es tu mejor activo:', B(['**Contenido que enseña una parte** (newsletter, YouTube, LinkedIn, TikTok).', 'Tu **lista de correo** es tuya; las redes no.', '**Lanzamientos** con clase en directo y fecha de cierre.', '**Afiliados y alianzas** con quien comparte público.', 'Una **comunidad gratuita** como embudo hacia el programa de pago.']), 'Mide cuánta gente de la lista acaba comprando.'],
+      metricas: ['Las que más pesan:', B(['**Conversión** de la lista de espera a compra.', '**Tasa de finalización** del curso: de ella dependen los resultados y las reseñas.', '**Reembolsos** y satisfacción.', 'Crecimiento de la **lista de correo** y **retención** de la comunidad.']), 'Si pocos terminan el curso, mejora el acompañamiento antes de vender más.'],
+      riesgos: ['Lo que suele fallar:', B(['**Producir antes de vender.**', 'Prometer **resultados poco realistas** o ingresos garantizados.', 'Contenido que ya existe gratis sin **diferenciación**.', '**Abandono** de alumnos por falta de acompañamiento.', 'Depender de **una sola red social**.', 'Escasez falsa en los lanzamientos: puede ser una práctica desleal.']), 'Cuida la promesa: es lo primero que verán las reseñas.'],
+      legal: ['Puntos clave (consúltalos con un profesional):', B(['**Desistimiento:** 14 días en contenido digital, salvo que la persona consienta expresamente la entrega inmediata y reconozca que pierde ese derecho.', '**IVA** de servicios digitales a consumidores de la UE (ventanilla única OSS).', '**Propiedad intelectual:** música, imágenes y plantillas con licencia.', '**Testimonios veraces** y sin promesas de ingresos.', '**RGPD** y email marketing: consentimiento y baja sencilla.']), 'No es asesoramiento legal.'],
+      plan30: ['Un mes para saber si hay curso:', B(['**Semana 1:** tema, resultado prometido y público concreto.', '**Semana 2:** página con programa, lista de espera y encuesta.', '**Semana 3:** clase gratuita y mini-versión de pago o preventa.', '**Semana 4:** decide con el panel Go / No-Go: grabar, ampliar la preventa o rehacer la propuesta.'])],
+    } },
+];
+const byId = (id) => AGENTS.find((a) => a.id === id) || null;
+
+/* ---------- estado ---------- */
+if (!S.spec || typeof S.spec !== 'object') S.spec = { active: '', seen: {} };
+const st = () => { if (!S.spec || typeof S.spec !== 'object') S.spec = { active: '', seen: {} }; return S.spec; };
+
+const forModel = () => {
+  const k = (LV.model && LV.model.key && LV.model.key()) || '';
+  let a = AGENTS.find((x) => x.models.indexOf(k) >= 0) || null;
+  if (!a && k === 'otro') { const e = LV.model.engine && LV.model.engine(); a = e ? AGENTS.find((x) => x.models.indexOf(e) >= 0) || null : null; }
+  return a;
+};
+const premium = () => !!(LV.premium && LV.premium.has());
+/** Agente activo en el chat (solo con Premium; si el plan se acaba, vuelve Astro). */
+const active = () => { const id = st().active; return id && premium() ? byId(id) : null; };
+
+/* ---------- constelación de cada agente ---------- */
+function glyph(a, cls) {
+  const P = a.pts;
+  const lines = a.ln.map((p) => '<line x1="' + P[p[0]][0] + '" y1="' + P[p[0]][1] + '" x2="' + P[p[1]][0] + '" y2="' + P[p[1]][1] + '"/>').join('');
+  const dots = P.map((p, i) => '<circle cx="' + p[0] + '" cy="' + p[1] + '" r="' + (i === 0 ? 2.6 : 1.8) + '"/>').join('');
+  return '<svg class="sp-gl' + (cls ? ' ' + cls : '') + '" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><g class="sp-gl-l">' + lines + '</g><g class="sp-gl-d">' + dots + '</g></svg>';
+}
+
+/* ---------- respuestas ---------- */
+function topicOf(n) {
+  let best = null, bs = 0;
+  TOPICS.forEach((t) => {
+    let s = 0;
+    t.kw.forEach((k) => { if (n.indexOf(k) >= 0) s += k.indexOf(' ') > 0 ? 2.2 : 1.2; });
+    if (s > bs) { bs = s; best = t; }
+  });
+  return bs >= 1.2 ? best : null;
+}
+function menuQr(a) { return TOPICS.map((t) => ({ l: t.t, q: qFor(a, t) })); }
+function qFor(a, t) { // pregunta equivalente que el propio agente entiende (se muestra como píldora)
+  const q = { val: '¿Cómo valido mi idea?', precio: '¿Cómo defino mi precio?', canal: '¿Cómo consigo mis primeros clientes?', metricas: '¿Qué métricas debo medir?', riesgos: '¿Qué errores debo evitar?', legal: '¿Qué trámites y leyes debo mirar?', plan30: '¿Cuál es mi plan de 30 días?' };
+  return q[t.id];
+}
+/** Una línea con las cifras reales de la persona (solo si las ha anotado) para cerrar la respuesta. */
+function mine(t, E) {
+  try {
+    const nm = E && E.name ? '«' + E.name + '»' : 'tu proyecto';
+    if (t.id === 'metricas' && LV.hasData()) {
+      const cs = LV.criteria(); const bad = cs.filter((c) => c.st !== 'ok');
+      return '**Con tus cifras de ' + nm + ':** ' + cs.map((c) => c.label.toLowerCase() + ' ' + c.show).join(' · ') + '. ' + (bad.length ? 'Lo que más te separa del mínimo orientativo: ' + bad.map((c) => c.label.toLowerCase()).slice(0, 2).join(' y ') + '.' : 'Todos los criterios superan el mínimo orientativo.');
+    }
+    if (t.id === 'metricas') return 'Aún no hay cifras de ' + nm + ' en Valida. Anótalas y las comparo aquí.';
+    if (t.id === 'plan30' && LV.hub && LV.hub.recommend) { const r = LV.hub.recommend(); if (r && r.title) return 'Para ' + nm + ', tu siguiente paso en ValidLance es **' + r.title + '**.'; }
+  } catch (e) { /* sin datos propios */ }
+  return '';
+}
+/** Responde como el agente activo. Devuelve null si la pregunta no es de su guía (entonces responde Astro). */
+function reply(X, E) {
+  const a = active(); if (!a) return null;
+  const n = norm(X.raw || X.n || '');
+  if (MENU_KW.some((k) => n.indexOf(k) >= 0)) return { t: J('## ' + a.name + ' · ' + a.vert, 'Esto cubro:', B(TOPICS.map((t) => '**' + t.t + '**')), 'Elige un tema o escríbeme tu duda.'), qr: menuQr(a), who: a.id, id: 'spec-menu' };
+  const t = topicOf(n); if (!t) return null;
+  const body = a.g[t.id]; if (!body) return null;
+  const ex = mine(t, E);
+  const acts = []; const go = { val: ['Abrir Valida', 'valida'], precio: ['Ver mi precio en Compite', 'compite'], canal: ['Ver la competencia', 'compite'], metricas: ['Anotar resultados en Valida', 'valida'], riesgos: ['Ver riesgos en Compite', 'compite'], legal: ['Abrir Lanza', 'lanza'], plan30: ['Ir al Centro de control', 'hub'] }[t.id];
+  if (go) acts.push({ l: go[0], go: go[1] });
+  const rest = TOPICS.filter((x) => x.id !== t.id).slice(0, 4).map((x) => ({ l: x.t, q: qFor(a, x) }));
+  return { t: J('## ' + a.name + ' · ' + t.t, J.apply(null, body), ex, 'Pautas generales de ' + (a.lc || a.vert) + ', no datos de mercado en tiempo real.'), acts: acts, qr: rest, who: a.id, id: 'spec-' + t.id };
+}
+/** Texto de la guía del agente (se envía como documento al servidor RAG de la persona, solo si ella lo ha activado). */
+function docs(a) {
+  a = a || active(); if (!a) return [];
+  const txt = TOPICS.map((t) => '## ' + a.name + ' · ' + a.vert + ': ' + t.t + '\n' + (a.g[t.id] || []).join('\n')).join('\n\n').slice(0, 15000);
+  return [{ doc_id: 'agente-' + a.id, title: 'Guía del agente ' + a.name + ' (' + a.vert + ')', text: txt }];
+}
+function intro(a) {
+  const nm = S.idea && S.idea.name ? S.idea.name.trim() : '';
+  return { t: J('## Soy ' + a.name + ', especialista en ' + (a.lc || a.vert),
+    'Te ayudo a **validar, cobrar y captar clientes** en este sector' + (nm ? ' con «' + nm + '»' : '') + '.',
+    'Soy un agente virtual: uso guías de mi sector y las cifras que tú anotas, no datos en tiempo real. **No es asesoramiento legal ni financiero.**',
+    'Elige un tema o pregúntame. Si no es de mi guía, te contesta Astro.'), qr: menuQr(a), who: a.id, id: 'spec-intro' };
+}
+
+/* ---------- acciones ---------- */
+function use(id) {
+  const a = byId(id); if (!a) return false;
+  if (LV.premium && !LV.premium.gate('agents', { agent: id })) return false;
+  st().active = id; st().seen[id] = Date.now(); LV.save();
+  closeAgents();
+  if (LV.agent && LV.agent.sayAs) { const R = intro(a); LV.agent.open && LV.agent.open(); LV.agent.sayAs(a.id, R.t, R.qr); }
+  paint();
+  return true;
+}
+function off() {
+  const a = active(); st().active = ''; LV.save(); paint();
+  if (a && LV.agent && LV.agent.say) LV.agent.say('Vuelve Astro. ' + a.name + ' sigue en la red cuando quieras consultarle.');
+}
+function paint() { try { if (LV.agent && LV.agent.refreshCtx) LV.agent.refreshCtx(); } catch (e) { /* sin chat */ } paintHub(); }
+function paintHub() { try { if (S.view === 'hub' && LV.RENDER.hub) LV.RENDER.hub(); } catch (e) { /* sin centro */ } }
+
+/* ---------- ventana «Red de agentes» ---------- */
+const modal = () => $('#m-agents');
+let lastFocus = null;
+function cardHtml(a, mine) {
+  const on = premium(), act = st().active === a.id && on;
+  return '<article class="agc' + (mine ? ' is-mine' : '') + (act ? ' is-on' : '') + '" aria-labelledby="sp-n-' + a.id + '">' +
+    '<div class="agc-top">' + glyph(a) + '<div class="agc-id"><h4 id="sp-n-' + a.id + '">' + esc(a.name) + '</h4><span>' + esc(a.vert) + '</span></div>' +
+    (mine ? '<span class="chip gold">' + ic('star', 'sm') + 'Tu sector</span>' : '') + '</div>' +
+    '<p class="agc-tag">' + esc(a.tag) + '</p>' +
+    '<ul class="agc-cv">' + a.covers.map((c) => '<li>' + ic('check', 'sm') + '<span>' + esc(c) + '</span></li>').join('') + '</ul>' +
+    '<div class="agc-f">' + (on
+      ? '<button class="btn ' + (act ? '' : 'pri') + '" type="button" data-act="spec-use" data-id="' + a.id + '">' + (act ? 'Conversando ahora' : 'Consultar con ' + esc(a.name)) + ic('right', 'sm') + '</button>'
+      : '<button class="btn" type="button" data-act="spec-use" data-id="' + a.id + '">' + ic('lock', 'sm') + 'Desbloquear con Premium</button>') + '</div></article>';
+}
+function renderAgents() {
+  const m = modal(); if (!m) return;
+  const mine = forModel();
+  const list = AGENTS.slice().sort((x, y) => (mine && y.id === mine.id) - (mine && x.id === mine.id));
+  $('#ag-g', m).innerHTML = list.map((a) => cardHtml(a, !!(mine && mine.id === a.id))).join('');
+  const s = $('#ag-state', m);
+  s.innerHTML = premium()
+    ? '<span class="chip ok">' + ic('check', 'sm') + 'Premium activo' + (LV.premium.isPreview() ? ' · vista previa' : '') + '</span><span>Elige un agente y se abrirá el chat con su guía.</span>'
+    : '<span class="chip gold">' + ic('lock', 'sm') + 'Incluido en Premium</span><span>Puedes ver qué cubre cada agente. Astro sigue disponible gratis en todo momento.</span>';
+}
+function openAgents() {
+  const m = modal(); if (!m) return;
+  lastFocus = document.activeElement; renderAgents(); m.hidden = false;
+  setTimeout(() => { const b = $('#ag-close', m); if (b) b.focus(); }, 30);
+}
+function closeAgents() { const m = modal(); if (!m || m.hidden) return; m.hidden = true; if (lastFocus && lastFocus.focus && document.contains(lastFocus)) { try { lastFocus.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } } lastFocus = null; }
+
+LV.ACT['spec-use'] = function (el) { use(el.dataset.id); };
+LV.ACT['spec-off'] = function () { off(); };
+LV.ACT['agents-open'] = function () { openAgents(); };
+LV.ACT['agents-close'] = function () { closeAgents(); };
+document.addEventListener('keydown', (e) => {
+  const m = modal(); if (!m || m.hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeAgents(); return; }
+  if (e.key === 'Tab') { // el foco se queda dentro de la ventana
+    const f = $$('button:not([disabled]),a[href],input,select,textarea,[tabindex]:not([tabindex="-1"])', m).filter((x) => x.offsetParent !== null);
+    if (!f.length) return; const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+document.addEventListener('click', (e) => { const m = modal(); if (m && !m.hidden && e.target === m) closeAgents(); });
+if (LV.hooks && LV.hooks.plan) LV.hooks.plan.push(() => { renderAgents(); paint(); });
+
+LV.spec = { list: () => AGENTS.slice(), get: byId, forModel: forModel, active: active, use: use, off: off, reply: reply, docs: docs, intro: intro, topics: TOPICS, glyph: glyph, card: cardHtml, openAgents: openAgents, closeAgents: closeAgents };
+})();
+
+/* ============================================================
+   Comunidad & Validación (Premium): hub de emprendedores dentro de ValidLance.
+   · Muro de proyectos: publicas tu proyecto con la landing generada en ValidLance y ves los de otros.
+   · Validación real y feedback: opiniones de emprendedores de tu mismo sector y las métricas que cada autor declara.
+   · Buscador y filtros: por sector, etapa de desarrollo y modelo de negocio (proyectos y personas).
+   · Contactos: visibilidad configurable (privado / visible / contactable) y solicitudes de contacto con tu aprobación.
+   Honestidad de diseño: ValidLance es una web estática y no tiene servidor de comunidad. Sin uno conectado, esta vista
+   funciona como VISTA PREVIA LOCAL: preparas y guardas tu publicación y tu perfil en este navegador, y nadie más los ve.
+   No hay usuarios ni proyectos de ejemplo: el muro solo muestra lo que llegue de TU servidor (LV.community.setProvider).
+   · API: LV.community = { setProvider, hasProvider, refresh, summary }
+   Contrato del proveedor (todo asíncrono; cada método es opcional salvo list/publish para el muro):
+     list(query)                 → { items: [Post], next? }          query = { q, sector, stage, model, same, cursor }
+     people(query)               → { items: [Profile], next? }
+     publish(post)               → Post (con id)       unpublish(id)
+     feedback.list(postId)       → [Feedback]          feedback.add(postId, fb) → Feedback
+     profile.get()               → Profile | null      profile.save(p) → Profile      profile.remove()
+     contacts.list()             → { sent: [Req], received: [Req] }
+     contacts.request(profileId, message) → Req        contacts.respond(id, 'accept'|'decline')      contacts.cancel(id)
+     report(kind, id, reason)
+     landing(id)                 → string (HTML)   opcional: si los posts traen hasLanding en vez de landingHtml, se pide al abrir «Ver landing»
+   ============================================================ */
+(function () {
+'use strict';
+const { $, $$, esc, ic } = LV;
+const S = LV.state;
+
+const STAGES = [['idea', 'Idea'], ['validando', 'Validando la demanda'], ['mvp', 'Prototipo o MVP'], ['clientes', 'Primeros clientes'], ['crecimiento', 'En crecimiento']];
+const ASKS = [['valor', 'Propuesta de valor'], ['precio', 'Precio'], ['landing', 'Landing'], ['publico', 'Público objetivo'], ['marca', 'Nombre y marca']];
+const LOOK = [['feedback', 'Feedback'], ['socio', 'Cofundador o socio'], ['mentor', 'Mentoría'], ['early', 'Primeros usuarios'], ['alianza', 'Alianzas']];
+const VIS = [['private', 'Privado', 'No aparezco en el directorio de emprendedores.'], ['visible', 'Visible', 'Aparezco en el directorio, pero no recibo solicitudes.'], ['contact', 'Contactable', 'Aparezco y otros emprendedores pueden enviarme una solicitud de contacto.']];
+const VERD = [['yes', 'Sí, lo usaría o lo compraría'], ['maybe', 'Quizás, depende'], ['no', 'No lo usaría']];
+const RATE = [['clarity', 'Claridad de la propuesta'], ['interest', 'Interés que despierta'], ['price', 'Precio razonable']];
+const TABS = [['muro', 'Muro', 'board'], ['gente', 'Emprendedores', 'people'], ['mio', 'Mi proyecto', 'pen'], ['contactos', 'Contactos', 'link']];
+const RULES = ['Publica solo proyectos tuyos y datos veraces.', 'Nada de promesas de rentabilidad ni de ingresos garantizados.', 'No compartas datos personales de terceros.', 'Feedback respetuoso, concreto y útil. Nada de spam ni de captación de clientes.'];
+const MODELS = ['saas', 'trade', 'serv', 'shop', 'info', 'otro'];
+
+const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ').trim();
+const lab = (arr, id) => { const f = arr.find((x) => x[0] === id); return f ? f[1] : ''; };
+const sectors = () => { try { return BasicAI.SECTORS.map((s) => [s.id, s.id === 'general' ? 'Otro sector' : s.label]); } catch (e) { return []; } };
+const secLabel = (id) => { const f = sectors().find((x) => x[0] === id); return f ? f[1] : ''; };
+const modelLabel = (id) => { const m = LV.MP && LV.MP[id]; return m ? m.b : ''; };
+const when = (t) => { try { return new Date(t).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' }); } catch (e) { return ''; } };
+const initials = (s) => { const w = String(s || '?').trim().split(/\s+/).filter(Boolean); return ((w[0] || '?').charAt(0) + (w[1] ? w[1].charAt(0) : '')).toUpperCase(); };
+const premium = () => !!(LV.premium && LV.premium.has());
+const cut = (s, n) => String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n);
+
+/* ---------- estado (se guarda en este navegador; nada sale de él sin servidor conectado) ---------- */
+function fresh() {
+  return { tab: 'muro', f: { q: '', sector: '', stage: '', model: '', same: false },
+    prof: { alias: '', bio: '', channel: '', vis: 'private', looking: [], stage: '', saved: 0 },
+    draft: { stage: '', sector: '', ask: [], share: { V: true, R: true, C: true }, url: '', ok: false }, pub: null, saved: [] };
+}
+const com = () => { if (!S.com || typeof S.com !== 'object') S.com = fresh(); const c = S.com, d = fresh(); Object.keys(d).forEach((k) => { if (c[k] == null) c[k] = d[k]; }); return c; };
+
+/* ---------- proveedor ---------- */
+let PV = null;
+const cache = { posts: null, people: null, fb: {}, contacts: null, prof: null, err: {}, busy: {} };
+let seq = 0;
+const hasPV = () => !!PV;
+function call(fn, ...args) { // llama al proveedor con límite de tiempo y errores normalizados
+  return new Promise((res, rej) => {
+    const to = setTimeout(() => rej(new Error('Tiempo agotado: el servidor tarda en responder. Si es gratuito puede estar despertando; prueba de nuevo en un minuto.')), 32000);
+    Promise.resolve().then(() => fn(...args)).then((r) => { clearTimeout(to); res(r); }, (e) => { clearTimeout(to); rej(e); });
+  });
+}
+const errMsg = (e) => cut((e && e.message) || 'No se pudo completar la acción', 120);
+
+/* ---------- datos propios ---------- */
+function mySector() { try { const d = com().draft.sector; if (d && secLabel(d)) return { id: d, label: secLabel(d) }; return LV.landReady() || LV.hasIdea() ? LV.sector() : null; } catch (e) { return null; } }
+function myModel() { const k = LV.model && LV.model.key && LV.model.key(); return k === 'crea' ? 'info' : (k || ''); }
+function projName() { return cut(S.idea.name, 80) || cut(((LV.gen() || {}).name), 80) || ''; }
+function projPitch() { return cut(S.idea.pitch, 240) || cut(String((S.compite.brief || {}).text || ''), 240); }
+function stageGuess() { return LV.hasData() || (S.genera && S.genera.pub) ? 'validando' : 'idea'; }
+function metricsOf(share) {
+  const m = LV.metrics(); if (!(m.V > 0 || m.R > 0 || m.E > 0)) return null;
+  const sh = share || { V: true, R: true, C: true }, o = {};
+  if (sh.V && m.V > 0) o.visits = m.V; if (sh.R && m.R > 0) o.regs = m.R; if (sh.C && m.V > 0) o.conv = m.R / m.V;
+  return Object.keys(o).length ? o : null;
+}
+function buildPost() {
+  const d = com().draft, sec = mySector();
+  return { name: projName(), pitch: projPitch(), sector: sec ? sec.id : 'general', model: myModel() || 'otro', stage: d.stage || stageGuess(), ask: d.ask.slice(0, 5),
+    metrics: metricsOf(d.share), landingUrl: /^https:\/\/[^\s]+$/i.test(d.url) ? d.url : '' };
+}
+const ownPost = () => { const p = com().pub; return p ? Object.assign({}, p, { own: true, author: { alias: com().prof.alias || 'Tú' } }) : null; };
+
+/* ---------- landing ajena: se muestra en un marco sin scripts, sin red y sin formularios activos ---------- */
+function safeDoc(html) {
+  let h = String(html || '').slice(0, 700000);
+  h = h.replace(/<script[\s\S]*?<\/script\s*>/gi, '').replace(/<script\b[^>]*>/gi, '').replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '').replace(/javascript:/gi, '').replace(/<(iframe|object|embed|link|base|meta)\b[^>]*>/gi, '');
+  /* nada sale a la red: solo imágenes incrustadas (data:) y anclas internas (#); el resto de URLs se descarta */
+  h = h.replace(/\s(src|srcset|poster|background|action|formaction|data|href|xlink:href)\s*=\s*("([^"]*)"|'([^']*)'|[^\s>]+)/gi, (m, a, v) => {
+    const val = v.replace(/^["']|["']$/g, '').trim(), k = a.toLowerCase();
+    if (/^(src|srcset|poster|background)$/.test(k) && /^data:image\//i.test(val)) return m;
+    if (k === 'href' && val.charAt(0) === '#') return m;
+    return '';
+  }).replace(/url\(\s*(['"]?)(?!data:image\/)[^)]*\)/gi, 'none');
+  const csp = '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; img-src data:; style-src \'unsafe-inline\'; font-src data:">';
+  return /<head[^>]*>/i.test(h) ? h.replace(/<head[^>]*>/i, (m) => m + csp) : csp + h;
+}
+function frame(html) { return '<iframe class="cm-frame" sandbox="" referrerpolicy="no-referrer" title="Vista previa de la landing" srcdoc="' + esc(safeDoc(html)) + '"></iframe>'; }
+
+/* ---------- filtros ---------- */
+function match(it, f, kind) {
+  if (f.sector && it.sector !== f.sector) return false;
+  if (f.stage && it.stage !== f.stage) return false;
+  if (f.model && it.model !== f.model) return false;
+  if (f.same) { const s = mySector(); if (s && it.sector !== s.id) return false; }
+  if (f.q) {
+    const hay = norm([it.name, it.pitch, it.bio, it.alias, it.author && it.author.alias, secLabel(it.sector), modelLabel(it.model), lab(STAGES, it.stage)].join(' '));
+    if (!norm(f.q).split(' ').every((w) => hay.indexOf(w) >= 0)) return false;
+  }
+  return true;
+}
+const filtersOn = (f) => !!(f.q || f.sector || f.stage || f.model || f.same);
+const query = () => Object.assign({}, com().f);
+
+/* ---------- piezas de interfaz ---------- */
+const chip = (t, c, i) => '<span class="chip' + (c ? ' ' + c : '') + '">' + (i ? ic(i, 'sm') : '') + esc(t) + '</span>';
+function metricsHtml(m) {
+  if (!m) return '';
+  const it = []; if (m.visits != null) it.push(['Visitas', String(m.visits)]); if (m.regs != null) it.push(['Registros', String(m.regs)]); if (m.conv != null) it.push(['Conversión', (m.conv * 100).toFixed(1).replace('.', ',') + ' %']);
+  if (!it.length) return '';
+  return '<dl class="cm-m" aria-label="Métricas declaradas por el autor">' + it.map((x) => '<div><dt>' + x[0] + '</dt><dd>' + esc(x[1]) + '</dd></div>').join('') + '</dl><p class="cm-m-n">Declaradas por el autor; ValidLance no las verifica.</p>';
+}
+function fbLine(p) {
+  const f = p.feedback; if (!f || !f.n) return '';
+  const y = f.n ? Math.round(((f.yes || 0) / f.n) * 100) : 0;
+  return '<p class="cm-fl">' + ic('msg', 'sm') + '<span><b>' + Number(f.n) + '</b> ' + (f.n === 1 ? 'opinión' : 'opiniones') + ' · <b>' + y + ' %</b> lo usaría</span></p>';
+}
+function postCard(p) {
+  const own = !!p.own, al = (p.author && p.author.alias) || p.alias || 'Emprendedor/a', id = own && p.id !== 'preview' ? 'own' : esc(p.id || 'own');
+  const sc = mySector(), same = sc && p.sector === sc.id && !own;
+  return '<article class="cm-p' + (own ? ' own' : '') + '" aria-labelledby="cm-pt-' + id + '">' +
+    '<header class="cm-p-h"><span class="cm-av" aria-hidden="true">' + esc(initials(own ? p.name : al)) + '</span><div class="cm-p-id"><h4 id="cm-pt-' + id + '">' + esc(cut(p.name, 80) || 'Proyecto sin nombre') + '</h4><span>por ' + esc(cut(al, 40)) + (p.at ? ' · ' + when(p.at) : '') + '</span></div>' +
+    (own ? chip(hasPV() ? 'Tu publicación' : 'Solo tú lo ves', 'gold', hasPV() ? 'star' : 'eye') : same ? chip('Tu sector', 'acc', 'check') : '') + '</header>' +
+    '<p class="cm-p-d">' + esc(cut(p.pitch, 240)) + '</p>' +
+    '<div class="chips">' + (p.sector ? chip(secLabel(p.sector) || 'Sector', '') : '') + (p.stage ? chip(lab(STAGES, p.stage), '') : '') + (p.model ? chip(modelLabel(p.model) || 'Otro', '') : '') + '</div>' +
+    ((p.ask || []).length ? '<p class="cm-ask"><b>Pide opinión sobre:</b> ' + esc((p.ask || []).map((a) => lab(ASKS, a)).filter(Boolean).join(' · ')) + '</p>' : '') +
+    metricsHtml(p.metrics) + fbLine(p) +
+    '<footer class="cm-p-f">' +
+      (p.landingHtml || p.landingUrl || p.hasLanding || own ? '<button class="btn sm" type="button" data-act="com-land" data-id="' + id + '">' + ic('eye', 'sm') + 'Ver landing</button>' : '') +
+      (own ? '<button class="btn sm ghost" type="button" data-act="com-tab" data-t="mio">' + ic('pen', 'sm') + 'Gestionar</button>'
+        : '<button class="btn sm pri" type="button" data-act="com-fb" data-id="' + id + '">' + ic('msg', 'sm') + 'Dar feedback</button>' +
+          (p.author && p.author.id ? '<button class="btn sm" type="button" data-act="com-req" data-id="' + esc(p.author.id) + '" data-al="' + esc(cut(al, 40)) + '">' + ic('link', 'sm') + 'Pedir contacto</button>' : '') +
+          '<button class="btn sm ghost" type="button" data-act="com-rep" data-k="post" data-id="' + id + '" aria-label="Denunciar este proyecto">' + ic('alert', 'sm') + '</button>') +
+    '</footer></article>';
+}
+function personCard(p) {
+  const al = p.alias || 'Emprendedor/a', can = p.vis === 'contact' && p.id;
+  return '<article class="cm-p person" aria-labelledby="cm-pp-' + esc(p.id) + '">' +
+    '<header class="cm-p-h"><span class="cm-av" aria-hidden="true">' + esc(initials(al)) + '</span><div class="cm-p-id"><h4 id="cm-pp-' + esc(p.id) + '">' + esc(cut(al, 40)) + '</h4><span>' + esc(cut(p.role || '', 60)) + '</span></div></header>' +
+    (p.bio ? '<p class="cm-p-d">' + esc(cut(p.bio, 200)) + '</p>' : '') +
+    '<div class="chips">' + (p.sector ? chip(secLabel(p.sector) || 'Sector', '') : '') + (p.stage ? chip(lab(STAGES, p.stage), '') : '') + (p.model ? chip(modelLabel(p.model) || 'Otro', '') : '') + '</div>' +
+    ((p.looking || []).length ? '<p class="cm-ask"><b>Busca:</b> ' + esc(p.looking.map((a) => lab(LOOK, a)).filter(Boolean).join(' · ')) + '</p>' : '') +
+    '<footer class="cm-p-f">' + (can ? '<button class="btn sm pri" type="button" data-act="com-req" data-id="' + esc(p.id) + '" data-al="' + esc(cut(al, 40)) + '">' + ic('link', 'sm') + 'Pedir contacto</button>' : '<span class="cm-na">No recibe solicitudes</span>') +
+    (p.id ? '<button class="btn sm ghost" type="button" data-act="com-rep" data-k="person" data-id="' + esc(p.id) + '" aria-label="Denunciar este perfil">' + ic('alert', 'sm') + '</button>' : '') + '</footer></article>';
+}
+function sel(id, label, opts, val, all) {
+  return '<label class="cm-sel"><span class="sr">' + esc(label) + '</span><select class="in" id="' + id + '" data-f="' + id.replace('cm-', '') + '"><option value="">' + esc(all) + '</option>' +
+    opts.map((o) => '<option value="' + esc(o[0]) + '"' + (val === o[0] ? ' selected' : '') + '>' + esc(o[1]) + '</option>').join('') + '</select></label>';
+}
+function filterBar() {
+  const f = com().f, sc = mySector();
+  return '<div class="cm-f" role="search" aria-label="Buscar y filtrar">' +
+    '<label class="cm-q"><span class="sr">Buscar</span>' + ic('search', 'sm') + '<input class="in" id="cm-q" type="search" maxlength="80" autocomplete="off" placeholder="Buscar por nombre, idea o palabra clave" value="' + esc(f.q) + '"></label>' +
+    sel('cm-sector', 'Sector', sectors(), f.sector, 'Todos los sectores') + sel('cm-stage', 'Etapa de desarrollo', STAGES, f.stage, 'Todas las etapas') +
+    sel('cm-model', 'Modelo de negocio', MODELS.map((m) => [m, modelLabel(m)]), f.model, 'Todos los modelos') +
+    '<div class="cm-f-r">' + (sc ? '<label class="cm-chk"><input type="checkbox" id="cm-same"' + (f.same ? ' checked' : '') + '><span>Solo mi sector (' + esc(sc.label) + ')</span></label>' : '<span></span>') +
+    '<button class="btn sm ghost" type="button" data-act="com-clear"' + (filtersOn(f) ? '' : ' disabled') + '>Limpiar filtros</button></div></div>';
+}
+
+/* ---------- vista bloqueada (plan Gratuito) ---------- */
+function lockedView() {
+  const F = [['board', 'Muro de proyectos', 'Publica tu proyecto con la landing que generaste en ValidLance y mira los de otros emprendedores.'],
+    ['msg', 'Validación y feedback', 'Recibe opiniones y métricas iniciales de gente de tu mismo sector, y devuelve el favor.'],
+    ['search', 'Buscador y filtros', 'Encuentra proyectos y personas por sector, etapa de desarrollo y modelo de negocio.'],
+    ['link', 'Contactos a tu medida', 'Elige si eres privado, visible o contactable, y acepta solo las solicitudes que quieras.']];
+  return '<section class="cm-lock" aria-labelledby="cml-t"><div class="cm-lock-h"><span class="chip gold">' + ic('lock', 'sm') + 'Incluido en Premium</span><h2 id="cml-t">Comunidad &amp; Validación</h2>' +
+    '<p>El sitio donde tu idea deja de estar sola: enséñala, consigue opiniones reales y conoce a quien te puede ayudar. Tu plan Gratuito sigue con todo el flujo de validación y con Astro.</p>' +
+    '<div class="row"><button class="btn pri" type="button" data-act="com-open">' + ic('lock', 'sm') + 'Desbloquear con Premium</button><button class="btn ghost" type="button" data-act="prem-open">Ver planes y precios</button></div></div>' +
+    '<ul class="cm-lock-f">' + F.map((f) => '<li><span class="hub-pro-ic">' + ic(f[0]) + '</span><span><b>' + f[1] + '</b><small>' + f[2] + '</small></span></li>').join('') + '</ul>' +
+    '<div class="cm-sk" aria-hidden="true"><div class="cm-sk-c"><i></i><b></b><b></b><span></span></div><div class="cm-sk-c"><i></i><b></b><b></b><span></span></div><div class="cm-sk-c"><i></i><b></b><b></b><span></span></div></div>' +
+    '<p class="fine">Vista de ejemplo del diseño; no hay proyectos ni personas reales hasta que conectes tu comunidad.</p></section>';
+}
+
+/* ---------- pestañas ---------- */
+function banner() {
+  return hasPV() ? '' :
+    '<div class="cm-bn" role="note">' + ic('info', 'sm') + '<div><b>Vista previa local.</b> Tu publicación y tu perfil se guardan solo en este navegador y nadie más los ve: ValidLance aún no tiene un servidor de comunidad conectado. ' +
+    '<details><summary>Para quien administra la app</summary><p>Conecta tu servidor con <code>LV.community.setProvider({ list, publish, feedback, profile, contacts })</code>. Con él, el muro, el feedback y las solicitudes funcionan entre personas reales. El contrato completo está en la guía de monetización.</p></details></div></div>';
+}
+function wallHtml() {
+  const f = com().f; let items, loading = false, err = '';
+  if (hasPV()) { items = (cache.posts || []).filter((p) => match(p, f)); loading = cache.busy.posts; err = cache.err.posts || ''; }
+  else { const o = ownPost(); items = o && match(o, f) ? [o] : []; }
+  if (loading && !cache.posts) return '<div class="cm-st" role="status">' + ic('clock') + '<p>Cargando proyectos…</p></div>';
+  if (err) return '<div class="cm-st err" role="alert">' + ic('alert') + '<p>' + esc(err) + '</p><button class="btn sm" type="button" data-act="com-retry" data-k="posts">Reintentar</button></div>';
+  if (items.length) return items.map(postCard).join('');
+  if (filtersOn(f)) return '<div class="cm-st">' + ic('search') + '<h4>Sin resultados</h4><p>Ningún proyecto encaja con esos filtros.</p><button class="btn sm" type="button" data-act="com-clear">Limpiar filtros</button></div>';
+  return '<div class="cm-st">' + ic('board') + '<h4>Aún no hay proyectos publicados</h4><p>' + (hasPV() ? 'Sé quien abra el muro: publica el tuyo.' : 'Cuando publiques el tuyo y conectes tu comunidad, aparecerá aquí junto a los de otros emprendedores.') + '</p>' +
+    '<button class="btn pri sm" type="button" data-act="com-tab" data-t="mio">Publicar mi proyecto</button></div>' + (hasPV() ? '' : mockCard());
+}
+/** Cómo se verá TU tarjeta (con tus datos, sin ningún usuario inventado). */
+function mockCard() {
+  if (!LV.hasIdea() && !LV.landReady()) return '';
+  const p = Object.assign(buildPost(), { own: true, author: { alias: com().prof.alias || 'Tú' } });
+  return '<div class="cm-pv"><p class="cm-pv-l">' + ic('eye', 'sm') + 'Así se verá tu tarjeta en el muro</p>' + postCard(Object.assign(p, { id: 'preview' })).replace(/<footer[\s\S]*<\/footer>/, '') + '</div>';
+}
+function peopleHtml() {
+  const f = com().f; let items, loading = false, err = '';
+  if (hasPV()) { items = (cache.people || []).filter((p) => match(p, f)); loading = cache.busy.people; err = cache.err.people || ''; } else items = [];
+  if (loading && !cache.people) return '<div class="cm-st" role="status">' + ic('clock') + '<p>Cargando emprendedores…</p></div>';
+  if (err) return '<div class="cm-st err" role="alert">' + ic('alert') + '<p>' + esc(err) + '</p><button class="btn sm" type="button" data-act="com-retry" data-k="people">Reintentar</button></div>';
+  if (items.length) return items.map(personCard).join('');
+  if (filtersOn(f)) return '<div class="cm-st">' + ic('search') + '<h4>Sin resultados</h4><p>Nadie encaja con esos filtros.</p><button class="btn sm" type="button" data-act="com-clear">Limpiar filtros</button></div>';
+  return '<div class="cm-st">' + ic('people') + '<h4>Aún no hay emprendedores en el directorio</h4><p>' + (hasPV() ? 'Quien elija ser «Visible» o «Contactable» aparecerá aquí. Tú también puedes, desde la pestaña Contactos.' : 'Aquí aparecerán las personas que elijan ser visibles, cuando conectes tu comunidad. Tú decides tu visibilidad en Contactos.') + '</p>' +
+    '<button class="btn sm" type="button" data-act="com-tab" data-t="contactos">Configurar mi visibilidad</button></div>';
+}
+function tabMuro() {
+  return '<div class="cm-two"><div>' + filterBar() + '<p class="cm-count" id="cm-count" aria-live="polite"></p><div class="cm-list" id="cm-list">' + wallHtml() + '</div></div>' + rulesCard() + '</div>';
+}
+function tabGente() { return '<div class="cm-two"><div>' + filterBar() + '<p class="cm-count" id="cm-count" aria-live="polite"></p><div class="cm-list" id="cm-list">' + peopleHtml() + '</div></div>' + rulesCard() + '</div>'; }
+function rulesCard() {
+  return '<aside class="card cm-rules" aria-labelledby="cm-ru-t"><h3 id="cm-ru-t">' + ic('shield', 'sm') + 'Normas de la comunidad</h3><ul>' + RULES.map((r) => '<li>' + ic('check', 'sm') + '<span>' + esc(r) + '</span></li>').join('') + '</ul>' +
+    '<p class="fine">Puedes denunciar cualquier proyecto o perfil con el icono de aviso. ValidLance no es asesoramiento legal ni financiero.</p></aside>';
+}
+
+/* Feedback recibido sobre mi proyecto */
+function summ(list) {
+  const n = list.length, c = { yes: 0, maybe: 0, no: 0 }, sum = { clarity: 0, interest: 0, price: 0 }, cn = { clarity: 0, interest: 0, price: 0 }; let same = 0;
+  const sc = mySector();
+  list.forEach((f) => { if (c[f.verdict] != null) c[f.verdict]++; RATE.forEach((r) => { const v = Number(f.ratings && f.ratings[r[0]]); if (v >= 1 && v <= 5) { sum[r[0]] += v; cn[r[0]]++; } }); if (f.sameSector || (sc && f.author && f.author.sector === sc.id)) same++; });
+  return { n: n, c: c, avg: RATE.map((r) => [r[1], cn[r[0]] ? sum[r[0]] / cn[r[0]] : null]), same: same };
+}
+function fbHtml() {
+  const p = com().pub;
+  if (!p) return '';
+  const list = hasPV() ? (cache.fb[p.id] || null) : [];
+  let body;
+  if (hasPV() && cache.busy['fb' + p.id] && !list) body = '<div class="cm-st" role="status">' + ic('clock') + '<p>Cargando opiniones…</p></div>';
+  else if (hasPV() && cache.err['fb' + p.id]) body = '<div class="cm-st err" role="alert">' + ic('alert') + '<p>' + esc(cache.err['fb' + p.id]) + '</p><button class="btn sm" type="button" data-act="com-retry" data-k="fb">Reintentar</button></div>';
+  else if (!list || !list.length) body = '<div class="cm-st">' + ic('msg') + '<h4>Aún no has recibido opiniones</h4><p>' + (hasPV() ? 'Cuando otros emprendedores comenten tu proyecto, verás aquí el resumen y cada comentario.' : 'Cuando conectes tu comunidad, aquí verás las opiniones de emprendedores de tu sector.') + '</p></div>';
+  else {
+    const s = summ(list), pct = (k) => Math.round((s.c[k] / s.n) * 100);
+    body = '<div class="cm-sum"><div class="cm-sum-b" role="img" aria-label="' + pct('yes') + ' % sí, ' + pct('maybe') + ' % quizás, ' + pct('no') + ' % no"><i class="y" style="width:' + pct('yes') + '%"></i><i class="m" style="width:' + pct('maybe') + '%"></i><i class="n" style="width:' + pct('no') + '%"></i></div>' +
+      '<dl class="cm-m"><div><dt>Opiniones</dt><dd>' + s.n + '</dd></div><div><dt>Lo usarían</dt><dd>' + pct('yes') + ' %</dd></div><div><dt>De tu sector</dt><dd>' + s.same + '</dd></div>' + s.avg.filter((a) => a[1] != null).map((a) => '<div><dt>' + esc(a[0]) + '</dt><dd>' + a[1].toFixed(1).replace('.', ',') + ' / 5</dd></div>').join('') + '</dl></div>' +
+      '<ul class="cm-fb">' + list.slice(0, 50).map((f) => '<li><header><b>' + esc(cut(f.author && f.author.alias || 'Emprendedor/a', 40)) + '</b>' + chip(lab(VERD, f.verdict) || '', f.verdict === 'yes' ? 'ok' : f.verdict === 'no' ? 'risk' : 'warn') + ((f.sameSector || (mySector() && f.author && f.author.sector === mySector().id)) ? chip('Tu sector', 'acc') : '') + '<span>' + when(f.at) + '</span></header><p>' + esc(cut(f.text, 600)) + '</p></li>').join('') + '</ul>';
+  }
+  return '<section class="card" aria-labelledby="cm-fb-t"><div class="card-h"><h3 id="cm-fb-t">Validación recibida</h3>' + (hasPV() ? '<button class="btn sm ghost" type="button" data-act="com-retry" data-k="fb">' + ic('refresh', 'sm') + 'Actualizar</button>' : '') + '<span class="sub">Opiniones de otros emprendedores sobre tu proyecto.</span></div>' + body + '</section>';
+}
+function tabMio() {
+  const c = com(), d = c.draft, ready = LV.landReady(), p = c.pub, sc = mySector(), post = buildPost();
+  if (!ready) {
+    return LV.zeroHtml({ ic: 'genera', t: 'Primero genera tu landing', p: 'El muro enseña tu proyecto a través de la landing que escribes en ValidLance. Cuenta tu idea y genérala en unos minutos.', a: [{ l: 'Ir al generador de landings', act: 'go', data: { v: 'genera' } }] });
+  }
+  const m = LV.metrics(), hasM = m.V > 0 || m.R > 0;
+  const stage = d.stage || stageGuess();
+  return '<div class="cm-two mio"><div class="cm-col">' +
+    '<section class="card" aria-labelledby="cm-pu-t"><div class="card-h"><h3 id="cm-pu-t">' + (p ? 'Tu proyecto en el muro' : 'Publicar mi proyecto') + '</h3>' + (p ? chip(hasPV() ? 'Publicado' : 'Guardado en este navegador', 'ok', 'check') : '') + '<span class="sub">' + (hasPV() ? 'Lo verán los miembros Premium de la comunidad.' : 'Vista previa local: lo ves solo tú.') + '</span></div>' +
+      '<div class="cm-sum-p"><span class="cm-av" aria-hidden="true">' + esc(initials(post.name)) + '</span><div><b>' + esc(post.name || 'Tu proyecto') + '</b><p>' + esc(post.pitch) + '</p><div class="chips">' + chip(sc ? sc.label : 'Sector por detectar', '') + chip(modelLabel(post.model) || 'Otro', '') + '</div></div></div>' +
+      '<div class="fields">' +
+        '<div class="field"><label class="lbl" for="cm-d-sector">Sector</label><select class="in" id="cm-d-sector" data-d="sector">' + sectors().map((x) => '<option value="' + x[0] + '"' + ((sc && sc.id) === x[0] ? ' selected' : '') + '>' + esc(x[1]) + '</option>').join('') + '</select><p class="help">Lo detecta ValidLance a partir de tu idea; cámbialo si no encaja. Se usa para encontrar a quien opine desde tu mismo sector.</p></div>' +
+        '<div class="field"><label class="lbl" for="cm-d-stage">Etapa de desarrollo</label><select class="in" id="cm-d-stage" data-d="stage">' + STAGES.map((s) => '<option value="' + s[0] + '"' + (stage === s[0] ? ' selected' : '') + '>' + s[1] + '</option>').join('') + '</select></div>' +
+        '<fieldset class="field cm-fs"><legend class="lbl">¿Sobre qué quieres opinión?</legend><div class="chips">' + ASKS.map((a) => '<label class="cm-ck"><input type="checkbox" data-d="ask" value="' + a[0] + '"' + (d.ask.indexOf(a[0]) >= 0 ? ' checked' : '') + '><span>' + a[1] + '</span></label>').join('') + '</div></fieldset>' +
+        '<fieldset class="field cm-fs"><legend class="lbl">Métricas iniciales que compartes</legend>' + (hasM
+          ? '<div class="chips">' + [['V', 'Visitas ' + m.V], ['R', 'Registros ' + m.R], ['C', 'Conversión']].map((a) => '<label class="cm-ck"><input type="checkbox" data-d="share" value="' + a[0] + '"' + (d.share[a[0]] ? ' checked' : '') + '><span>' + a[1] + '</span></label>').join('') + '</div><p class="help">Son las cifras que anotaste en Valida. Se mostrarán como «declaradas por el autor».</p>'
+          : '<p class="help">Aún no has anotado resultados en Valida: se publicará sin métricas. Puedes actualizarlas cuando las tengas.</p>') + '</fieldset>' +
+        '<div class="field"><label class="lbl" for="cm-d-url">Dirección pública de tu landing (opcional)</label><input class="in" id="cm-d-url" data-d="url" type="url" inputmode="url" maxlength="200" autocomplete="off" spellcheck="false" placeholder="https://…" value="' + esc(d.url || S.genera.url || '') + '"><p class="help">' + (hasPV() ? 'Además del marco con tu landing, otros podrán abrir esta dirección.' : 'Solo se usará cuando haya una comunidad conectada.') + '</p></div>' +
+      '</div>' +
+      '<label class="cm-ok"><input type="checkbox" id="cm-d-ok" data-d="ok"' + (d.ok ? ' checked' : '') + '><span>Confirmo que el proyecto es mío, que los datos son veraces y que cumplo las <a href="#" data-act="com-rules">normas de la comunidad</a>.</span></label>' +
+      '<div class="row sp"><button class="btn" type="button" data-act="com-land" data-id="own">' + ic('eye', 'sm') + 'Ver mi landing como la verán</button><div class="row">' +
+        (p ? '<button class="btn ghost" type="button" data-act="com-unpub" id="cm-unpub">' + ic('x', 'sm') + '<span id="cm-unpub-t">Retirar del muro</span></button>' : '') +
+        '<button class="btn pri" type="button" data-act="com-pub" id="cm-pub"' + (d.ok ? '' : ' disabled') + '>' + ic('send', 'sm') + (p ? 'Actualizar publicación' : (hasPV() ? 'Publicar en el muro' : 'Guardar vista previa')) + '</button></div></div>' +
+      '<p class="help err" id="cm-pub-err" role="alert"></p></section></div>' +
+    '<div class="cm-col">' + (p ? fbHtml() : howCard() + mockCard()) + '</div></div>';
+}
+function howCard() {
+  const st = [['Publica', 'Eliges tu etapa, sobre qué quieres opinión y qué métricas compartes.'], ['Recibe opiniones', 'Emprendedores de tu sector te dicen si lo usarían y qué cambiarían.'], ['Mejora y repite', 'Ajusta tu landing, anota resultados en Valida y actualiza la publicación.']];
+  return '<section class="card" aria-labelledby="cm-hw-t"><div class="card-h"><h3 id="cm-hw-t">Cómo funciona</h3></div><ol class="cm-how">' + st.map((x) => '<li><b>' + x[0] + '</b><span>' + x[1] + '</span></li>').join('') + '</ol></section>';
+}
+function tabContactos() {
+  const c = com(), pr = c.prof, sc = mySector();
+  return '<div class="cm-two"><div class="cm-col"><section class="card" aria-labelledby="cm-pr-t"><div class="card-h"><h3 id="cm-pr-t">Mi perfil y visibilidad</h3>' + chip(lab(VIS.map((v) => [v[0], v[1]]), pr.vis), pr.vis === 'private' ? '' : 'ok') + '<span class="sub">Tú decides qué se ve y quién puede escribirte.</span></div>' +
+    '<div class="fields">' +
+      '<fieldset class="field cm-fs"><legend class="lbl">Visibilidad</legend><div class="cm-vis" role="radiogroup" aria-label="Visibilidad">' + VIS.map((v) => '<label class="cm-vo' + (pr.vis === v[0] ? ' on' : '') + '"><input type="radio" name="cm-vis" data-p="vis" value="' + v[0] + '"' + (pr.vis === v[0] ? ' checked' : '') + '><span><b>' + v[1] + '</b><small>' + v[2] + '</small></span></label>').join('') + '</div></fieldset>' +
+      '<div class="field"><label class="lbl" for="cm-p-alias">Alias público</label><input class="in" id="cm-p-alias" data-p="alias" maxlength="40" autocomplete="off" placeholder="Cómo quieres que te vean (no uses tu email)" value="' + esc(pr.alias) + '"></div>' +
+      '<div class="field"><label class="lbl" for="cm-p-bio">Presentación breve</label><textarea class="in" id="cm-p-bio" data-p="bio" maxlength="200" rows="3" placeholder="Qué construyes y qué experiencia aportas">' + esc(pr.bio) + '</textarea></div>' +
+      '<fieldset class="field cm-fs"><legend class="lbl">Qué buscas en la comunidad</legend><div class="chips">' + LOOK.map((a) => '<label class="cm-ck"><input type="checkbox" data-p="looking" value="' + a[0] + '"' + (pr.looking.indexOf(a[0]) >= 0 ? ' checked' : '') + '><span>' + a[1] + '</span></label>').join('') + '</div></fieldset>' +
+      '<div class="field"><label class="lbl" for="cm-p-ch">Cómo contactarte (solo se comparte al aceptar una solicitud)</label><input class="in" id="cm-p-ch" data-p="channel" maxlength="120" autocomplete="off" placeholder="Email, LinkedIn o usuario de Telegram" value="' + esc(pr.channel) + '"></div>' +
+    '</div>' +
+    '<div class="cm-pvw"><p class="cm-pv-l">' + ic('eye', 'sm') + 'Así te verán los demás</p>' + (pr.vis === 'private' ? '<p class="help">Con visibilidad «Privado» no apareces en el directorio.</p>' : personCard({ id: 'me', alias: pr.alias || 'Tu alias', bio: pr.bio, sector: sc ? sc.id : '', stage: pr.stage || stageGuess(), model: myModel(), looking: pr.looking, vis: pr.vis }).replace(/<footer[\s\S]*<\/footer>/, '')) + '</div>' +
+    '<p class="fine">Al guardar, se mostrará tu alias, tu sector, tu etapa y lo que marques arriba a otros miembros Premium. Tu forma de contacto nunca se muestra en el directorio. Puedes cambiar tu visibilidad o borrar tu perfil cuando quieras.</p>' +
+    '<div class="row sp"><button class="btn ghost" type="button" data-act="com-wipe" id="cm-wipe">' + ic('x', 'sm') + '<span id="cm-wipe-t">Borrar mi perfil y mi publicación</span></button><button class="btn pri" type="button" data-act="com-psave" id="cm-psave">Guardar perfil</button></div>' +
+    '<p class="help err" id="cm-p-err" role="alert"></p></section></div>' +
+    '<div class="cm-col">' + reqHtml() + '</div></div>';
+}
+function reqHtml() {
+  const k = cache.contacts;
+  const li = (r, recv) => '<li><header><b>' + esc(cut((recv ? r.from : r.to) && (recv ? r.from : r.to).alias || 'Emprendedor/a', 40)) + '</b>' + chip({ pending: 'Pendiente', accepted: 'Aceptada', declined: 'Rechazada' }[r.status] || 'Pendiente', r.status === 'accepted' ? 'ok' : r.status === 'declined' ? 'risk' : 'warn') + '<span>' + when(r.at) + '</span></header>' +
+    (r.message ? '<p>' + esc(cut(r.message, 300)) + '</p>' : '') + (r.status === 'accepted' && r.channel ? '<p class="cm-chn">' + ic('mail', 'sm') + '<span>' + esc(cut(r.channel, 120)) + '</span></p>' : '') +
+    (recv && r.status === 'pending' ? '<div class="row"><button class="btn sm pri" type="button" data-act="com-resp" data-id="' + esc(r.id) + '" data-r="accept">Aceptar</button><button class="btn sm" type="button" data-act="com-resp" data-id="' + esc(r.id) + '" data-r="decline">Rechazar</button></div>' : '') +
+    (!recv && r.status === 'pending' ? '<div class="row"><button class="btn sm ghost" type="button" data-act="com-cancel" data-id="' + esc(r.id) + '">Cancelar solicitud</button></div>' : '') + '</li>';
+  let b;
+  if (!hasPV()) b = '<div class="cm-st">' + ic('link') + '<h4>Sin solicitudes</h4><p>Las solicitudes de contacto llegarán aquí cuando conectes tu comunidad.</p></div>';
+  else if (cache.busy.contacts && !k) b = '<div class="cm-st" role="status">' + ic('clock') + '<p>Cargando solicitudes…</p></div>';
+  else if (cache.err.contacts) b = '<div class="cm-st err" role="alert">' + ic('alert') + '<p>' + esc(cache.err.contacts) + '</p><button class="btn sm" type="button" data-act="com-retry" data-k="contacts">Reintentar</button></div>';
+  else if (!k || (!(k.received || []).length && !(k.sent || []).length)) b = '<div class="cm-st">' + ic('link') + '<h4>Sin solicitudes</h4><p>Cuando alguien te pida contacto, o tú se lo pidas a otra persona, lo verás aquí.</p></div>';
+  else b = ((k.received || []).length ? '<h4 class="cm-h4">Recibidas</h4><ul class="cm-fb">' + k.received.map((r) => li(r, true)).join('') + '</ul>' : '') + ((k.sent || []).length ? '<h4 class="cm-h4">Enviadas</h4><ul class="cm-fb">' + k.sent.map((r) => li(r, false)).join('') + '</ul>' : '');
+  return '<section class="card" aria-labelledby="cm-rq-t"><div class="card-h"><h3 id="cm-rq-t">Solicitudes de contacto</h3>' + (hasPV() ? '<button class="btn sm ghost" type="button" data-act="com-retry" data-k="contacts">' + ic('refresh', 'sm') + 'Actualizar</button>' : '') + '</div>' + b + '</section>';
+}
+
+/* ---------- vista principal ---------- */
+function renderTab() {
+  const c = com(), t = c.tab;
+  const body = t === 'gente' ? tabGente() : t === 'mio' ? tabMio() : t === 'contactos' ? tabContactos() : tabMuro();
+  const p = $('#cm-panel'); if (!p) return;
+  p.setAttribute('aria-labelledby', 'cm-t-' + t); p.innerHTML = body;
+  $$('.cm-tabs button').forEach((b) => { const on = b.dataset.t === t; b.setAttribute('aria-selected', String(on)); b.tabIndex = on ? 0 : -1; });
+  updateCount();
+}
+function updateCount() {
+  const n = $('#cm-count'); if (!n) return;
+  const c = com(), f = c.f;
+  if (c.tab === 'muro') { const L = hasPV() ? (cache.posts || []) : (ownPost() ? [ownPost()] : []); const k = L.filter((p) => match(p, f)).length; n.textContent = hasPV() && cache.posts ? k + (k === 1 ? ' proyecto' : ' proyectos') + (filtersOn(f) ? ' con estos filtros' : '') : ''; }
+  else if (c.tab === 'gente') { const k = (cache.people || []).filter((p) => match(p, f)).length; n.textContent = hasPV() && cache.people ? k + (k === 1 ? ' persona' : ' personas') + (filtersOn(f) ? ' con estos filtros' : '') : ''; }
+}
+function renderList() { const l = $('#cm-list'); if (!l) return; l.innerHTML = com().tab === 'gente' ? peopleHtml() : wallHtml(); updateCount(); const x = $('[data-act="com-clear"]', $('.cm-f')); if (x) x.disabled = !filtersOn(com().f); }
+LV.RENDER.comunidad = function () {
+  const el = $('#v-comunidad'); if (!el) return;
+  if (!premium()) { el.innerHTML = lockedView(); return; }
+  const c = com();
+  el.innerHTML = '<div class="cm-hd"><div><span class="chip ok">' + ic('check', 'sm') + 'Premium activo' + (LV.premium.isPreview() ? ' · vista previa' : '') + '</span></div></div>' + banner() +
+    '<div class="tabs cm-tabs" role="tablist" aria-label="Secciones de la comunidad">' + TABS.map((t) => '<button type="button" role="tab" id="cm-t-' + t[0] + '" data-act="com-tab" data-t="' + t[0] + '" aria-selected="' + (c.tab === t[0]) + '" aria-controls="cm-panel">' + ic(t[2], 'sm') + t[1] + '</button>').join('') + '</div>' +
+    '<div id="cm-panel" role="tabpanel"></div>';
+  renderTab(); load(c.tab);
+};
+function repaint() { if (S.view === 'comunidad') LV.RENDER.comunidad(); }
+
+/* ---------- carga desde el proveedor ---------- */
+function load(tab) {
+  if (!hasPV()) return;
+  if (tab === 'muro' && PV.list) fetchList('posts', PV.list);
+  else if (tab === 'gente' && PV.people) fetchList('people', PV.people);
+  else if (tab === 'mio' && com().pub && PV.feedback && PV.feedback.list) fetchFb();
+  else if (tab === 'contactos') { if (PV.contacts && PV.contacts.list) fetchContacts(); if (PV.profile && PV.profile.get && !cache.prof) fetchProfile(); }
+}
+let tq = 0; const tok = {};
+function fetchList(k, fn) {
+  const my = (tok[k] = ++seq); cache.busy[k] = true; cache.err[k] = '';
+  if (com().tab === (k === 'posts' ? 'muro' : 'gente')) renderList();
+  call(fn, query()).then((r) => { if (tok[k] === my) cache[k] = Array.isArray(r) ? r : ((r && r.items) || []); }).catch((e) => { if (tok[k] === my) cache.err[k] = 'No se pudo cargar: ' + errMsg(e); })
+    .then(() => { if (tok[k] !== my) return; cache.busy[k] = false; if (S.view === 'comunidad') renderList(); });
+}
+function fetchFb() {
+  const p = com().pub; if (!p) return; const k = 'fb' + p.id; cache.busy[k] = true; cache.err[k] = '';
+  call(PV.feedback.list, p.id).then((r) => { cache.fb[p.id] = Array.isArray(r) ? r : ((r && r.items) || []); }).catch((e) => { cache.err[k] = 'No se pudieron cargar las opiniones: ' + errMsg(e); }).then(() => { cache.busy[k] = false; if (S.view === 'comunidad' && com().tab === 'mio') renderTab(); });
+}
+function fetchContacts() {
+  cache.busy.contacts = true; cache.err.contacts = '';
+  call(PV.contacts.list).then((r) => { cache.contacts = r || { sent: [], received: [] }; }).catch((e) => { cache.err.contacts = 'No se pudieron cargar las solicitudes: ' + errMsg(e); }).then(() => { cache.busy.contacts = false; if (S.view === 'comunidad' && com().tab === 'contactos') renderTab(); });
+}
+function fetchProfile() {
+  call(PV.profile.get).then((r) => {
+    if (!r) return; cache.prof = r; const pr = com().prof;
+    if (!pr.saved) { pr.alias = cut(r.alias, 40); pr.bio = cut(r.bio, 200); pr.vis = ['private', 'visible', 'contact'].indexOf(r.vis) >= 0 ? r.vis : 'private'; pr.looking = Array.isArray(r.looking) ? r.looking.filter((x) => LOOK.some((l) => l[0] === x)) : []; pr.saved = Date.now(); LV.save(); if (S.view === 'comunidad' && com().tab === 'contactos') renderTab(); }
+  }).catch(() => { /* sin perfil guardado: se queda el local */ });
+}
+
+/* ---------- ventana auxiliar ---------- */
+const mdl = () => $('#m-com');
+let lastFocus = null, mk = null, busy = false;
+/** La lista del muro no trae el HTML de cada landing (pesa mucho): se pide al servidor solo cuando alguien pulsa «Ver landing». */
+function ensureLanding(p) {
+  if (!p || p.own || p.landingHtml || !p.hasLanding || !PV || !PV.landing || p._lst === 'loading') return;
+  const id = p.id; p._lst = 'loading'; p._lerr = '';
+  call(PV.landing, id).then((h) => { p.landingHtml = String(h || ''); p._lst = ''; if (!p.landingHtml) p.hasLanding = false; })
+    .catch((e) => { p._lst = 'err'; p._lerr = 'No se pudo cargar la landing: ' + errMsg(e); })
+    .then(() => { const m = mdl(); if (mk && mk.kind === 'land' && String(mk.id) === String(id) && m && !m.hidden) $('#cmm-c', m).innerHTML = modalHtml(); });
+}
+function openModal(kind, o) {
+  const m = mdl(); if (!m) return; mk = Object.assign({ kind: kind }, o || {}); lastFocus = document.activeElement;
+  if (kind === 'land') ensureLanding(findPost(mk.id));
+  $('#cmm-c', m).innerHTML = modalHtml(); m.hidden = false;
+  setTimeout(() => { const f = $('textarea, input, select, #cmm-x', m); if (f) f.focus(); }, 40);
+}
+function closeModal() { const m = mdl(); if (!m || m.hidden) return; m.hidden = true; mk = null; busy = false; if (lastFocus && lastFocus.focus && document.contains(lastFocus)) { try { lastFocus.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } } lastFocus = null; }
+function findPost(id) { if (id === 'own' || id === 'preview') return ownPost(); return (cache.posts || []).find((p) => String(p.id) === String(id)) || null; }
+function modalHtml() {
+  const x = '<button class="btn ico ghost cmm-x" type="button" id="cmm-x" data-act="com-mclose" aria-label="Cerrar">' + ic('x') + '</button>';
+  if (mk.kind === 'land') {
+    const p = findPost(mk.id), own = mk.id === 'own' || (p && p.own);
+    let doc = '';
+    if (own) { try { doc = LV.gen().html; } catch (e) { doc = ''; } } else if (p && p.landingHtml) doc = p.landingHtml;
+    return x + '<div><h3 id="cmm-t">' + (own ? 'Así verán tu landing' : esc(cut(p && p.name, 80) || 'Landing')) + '</h3><p>' + (own ? 'Vista previa sin scripts, tal como se muestra a los demás en el muro.' : 'Vista previa sin scripts, sin conexión a internet y sin formularios activos.') + '</p></div>' +
+      (doc ? frame(doc)
+        : p && p._lst === 'loading' ? '<div class="cm-st" role="status" aria-live="polite">' + ic('clock') + '<p>Cargando la landing…</p></div>'
+        : p && p._lst === 'err' ? '<div class="cm-st" role="alert">' + ic('alert') + '<p>' + esc(p._lerr) + '</p><button class="btn sm" type="button" data-act="com-land-retry" data-id="' + esc(String(p.id)) + '">Reintentar</button></div>'
+        : '<div class="cm-st">' + ic('eye') + '<p>Esta publicación no incluye una vista previa de la landing.</p></div>') +
+      (p && p.landingUrl && /^https:\/\/[^\s]+$/i.test(p.landingUrl) ? '<p class="fine"><a href="' + esc(p.landingUrl) + '" target="_blank" rel="noopener noreferrer nofollow">Abrir la dirección pública en otra pestaña ' + '</a> (sitio externo: ValidLance no lo controla).</p>' : '');
+  }
+  if (mk.kind === 'fb') {
+    const p = findPost(mk.id);
+    return x + '<div><h3 id="cmm-t">Dar feedback a «' + esc(cut(p && p.name, 60)) + '»</h3><p>Sé concreto y amable: ayuda más una opinión útil que un elogio. Tu alias y tu sector acompañan la opinión.</p></div>' +
+      '<fieldset class="field cm-fs"><legend class="lbl">¿Lo usarías o lo comprarías?</legend><div class="cm-vis" role="radiogroup">' + VERD.map((v, i) => '<label class="cm-vo"><input type="radio" name="cmf-v" value="' + v[0] + '"' + (i === 0 ? ' checked' : '') + '><span><b>' + v[1] + '</b></span></label>').join('') + '</div></fieldset>' +
+      '<div class="cm-rt">' + RATE.map((r) => '<label class="field"><span class="lbl">' + r[1] + '</span><select class="in" data-r="' + r[0] + '"><option value="">Sin valorar</option>' + [1, 2, 3, 4, 5].map((n) => '<option value="' + n + '">' + n + ' de 5</option>').join('') + '</select></label>').join('') + '</div>' +
+      '<div class="field"><label class="lbl" for="cmf-t">Tu comentario</label><textarea class="in" id="cmf-t" maxlength="600" rows="4" placeholder="Qué te convence, qué cambiarías y por qué (mínimo 15 caracteres)"></textarea><p class="help"><span id="cmf-n">0</span> / 600</p></div>' +
+      '<label class="cm-ok"><input type="checkbox" id="cmf-ok"><span>Mi opinión es honesta y respeta las normas de la comunidad.</span></label>' +
+      '<p class="help err" id="cmm-err" role="alert"></p><div class="row sp"><button class="btn ghost" type="button" data-act="com-mclose">Cancelar</button><button class="btn pri" type="button" data-act="com-fbsend" data-id="' + esc(mk.id) + '">Enviar feedback</button></div>';
+  }
+  if (mk.kind === 'req') {
+    return x + '<div><h3 id="cmm-t">Pedir contacto a ' + esc(mk.al || 'esta persona') + '</h3><p>Se enviará tu alias, tu sector, tu etapa y este mensaje. Tu forma de contacto solo se compartirá si la otra persona acepta.</p></div>' +
+      '<div class="field"><label class="lbl" for="cmr-t">Mensaje</label><textarea class="in" id="cmr-t" maxlength="300" rows="4" placeholder="Preséntate y explica por qué quieres hablar con esta persona (mínimo 15 caracteres)"></textarea><p class="help"><span id="cmr-n">0</span> / 300</p></div>' +
+      '<label class="cm-ok"><input type="checkbox" id="cmr-ok"><span>Contactaré con respeto y sin enviar publicidad ni spam.</span></label>' +
+      '<p class="help err" id="cmm-err" role="alert"></p><div class="row sp"><button class="btn ghost" type="button" data-act="com-mclose">Cancelar</button><button class="btn pri" type="button" data-act="com-reqsend" data-id="' + esc(mk.id) + '">Enviar solicitud</button></div>';
+  }
+  if (mk.kind === 'rep') {
+    return x + '<div><h3 id="cmm-t">Denunciar ' + (mk.k === 'person' ? 'este perfil' : 'este proyecto') + '</h3><p>Dinos qué incumple las normas. Lo revisa quien modera la comunidad.</p></div>' +
+      '<div class="field"><label class="lbl" for="cmd-r">Motivo</label><select class="in" id="cmd-r"><option value="spam">Spam o publicidad</option><option value="falso">Datos falsos o engañosos</option><option value="rentabilidad">Promesas de rentabilidad</option><option value="personal">Datos personales de terceros</option><option value="otro">Otro motivo</option></select></div>' +
+      '<p class="help err" id="cmm-err" role="alert"></p><div class="row sp"><button class="btn ghost" type="button" data-act="com-mclose">Cancelar</button><button class="btn pri" type="button" data-act="com-repsend" data-k="' + esc(mk.k) + '" data-id="' + esc(mk.id) + '">Enviar denuncia</button></div>';
+  }
+  if (mk.kind === 'rules') {
+    return x + '<div><h3 id="cmm-t">Normas de la comunidad</h3></div><ul class="cm-rl">' + RULES.map((r) => '<li>' + ic('check', 'sm') + '<span>' + esc(r) + '</span></li>').join('') + '</ul><div class="row"><button class="btn pri" type="button" data-act="com-mclose">Entendido</button></div>';
+  }
+  return x;
+}
+const merr = (t) => { const e = $('#cmm-err'); if (e) e.textContent = t || ''; };
+function needHandler(fn) { if (!hasPV() || !fn) { merr('Esta acción necesita una comunidad conectada. Aún no hay ningún servidor configurado.'); return false; } return true; }
+
+/* ---------- acciones ---------- */
+LV.ACT['com-tab'] = function (el) { const c = com(); c.tab = TABS.some((t) => t[0] === el.dataset.t) ? el.dataset.t : 'muro'; LV.save(); if (S.view !== 'comunidad') { LV.go('comunidad'); return; } renderTab(); load(c.tab); const b = $('#cm-t-' + c.tab); if (b && el.closest && el.closest('.cm-tabs')) b.focus({ preventScroll: true }); };
+LV.ACT['com-clear'] = function () { const c = com(); c.f = { q: '', sector: '', stage: '', model: '', same: false }; LV.save(); renderTab(); load(c.tab); const q = $('#cm-q'); if (q) q.focus({ preventScroll: true }); };
+LV.ACT['com-retry'] = function (el) { const k = el.dataset.k; if (k === 'fb') { cache.err['fb' + (com().pub || {}).id] = ''; fetchFb(); } else if (k === 'contacts') fetchContacts(); else if (k === 'people' && PV && PV.people) fetchList('people', PV.people); else if (PV && PV.list) fetchList('posts', PV.list); };
+LV.ACT['com-land'] = function (el) { openModal('land', { id: el.dataset.id }); };
+LV.ACT['com-land-retry'] = function (el) { const p = findPost(el.dataset.id), m = mdl(); if (!p || !m) return; p._lst = ''; ensureLanding(p); $('#cmm-c', m).innerHTML = modalHtml(); };
+LV.ACT['com-fb'] = function (el) { openModal('fb', { id: el.dataset.id }); };
+LV.ACT['com-req'] = function (el) { openModal('req', { id: el.dataset.id, al: el.dataset.al }); };
+LV.ACT['com-rep'] = function (el) { openModal('rep', { id: el.dataset.id, k: el.dataset.k }); };
+LV.ACT['com-rules'] = function (el, e) { if (e && e.preventDefault) e.preventDefault(); openModal('rules'); };
+LV.ACT['com-mclose'] = function () { closeModal(); };
+LV.ACT['com-fbsend'] = function (el) {
+  if (busy) return; const m = mdl(); const v = $('input[name="cmf-v"]:checked', m), t = cut($('#cmf-t', m).value, 600), ok = $('#cmf-ok', m).checked;
+  if (t.length < 15) { merr('Escribe al menos 15 caracteres para que el comentario sea útil.'); return; }
+  if (!ok) { merr('Confirma que tu opinión es honesta y respeta las normas.'); return; }
+  if (!needHandler(PV && PV.feedback && PV.feedback.add)) return;
+  const ratings = {}; $$('select[data-r]', m).forEach((s) => { if (s.value) ratings[s.dataset.r] = Number(s.value); });
+  busy = true; merr(''); el.disabled = true;
+  call(PV.feedback.add, el.dataset.id, { verdict: v ? v.value : 'maybe', ratings: ratings, text: t }).then(() => { closeModal(); LV.toast('Feedback enviado. ¡Gracias!', 'check'); if (cache.posts) { fetchList('posts', PV.list); } }).catch((e) => { busy = false; el.disabled = false; merr('No se pudo enviar: ' + errMsg(e)); });
+};
+LV.ACT['com-reqsend'] = function (el) {
+  if (busy) return; const m = mdl(); const t = cut($('#cmr-t', m).value, 300), ok = $('#cmr-ok', m).checked;
+  if (!com().prof.alias) { merr('Antes de pedir contacto, ponle un alias a tu perfil en la pestaña Contactos.'); return; }
+  if (t.length < 15) { merr('Escribe al menos 15 caracteres para presentarte.'); return; }
+  if (!ok) { merr('Confirma que contactarás con respeto y sin spam.'); return; }
+  if (!needHandler(PV && PV.contacts && PV.contacts.request)) return;
+  busy = true; merr(''); el.disabled = true;
+  call(PV.contacts.request, el.dataset.id, t).then(() => { closeModal(); LV.toast('Solicitud enviada', 'check'); cache.contacts = null; }).catch((e) => { busy = false; el.disabled = false; merr('No se pudo enviar: ' + errMsg(e)); });
+};
+LV.ACT['com-repsend'] = function (el) {
+  if (busy) return; const r = $('#cmd-r', mdl()).value;
+  if (!needHandler(PV && PV.report)) return;
+  busy = true; el.disabled = true;
+  call(PV.report, el.dataset.k, el.dataset.id, r).then(() => { closeModal(); LV.toast('Denuncia enviada. Gracias por cuidar la comunidad.', 'check'); }).catch((e) => { busy = false; el.disabled = false; merr('No se pudo enviar: ' + errMsg(e)); });
+};
+LV.ACT['com-pub'] = function () {
+  const c = com(), err = $('#cm-pub-err'); if (err) err.textContent = '';
+  if (!c.draft.ok) { if (err) err.textContent = 'Confirma las normas para publicar.'; return; }
+  if (!LV.landReady()) { if (err) err.textContent = 'Primero genera tu landing.'; return; }
+  const post = buildPost();
+  if (!post.name) { if (err) err.textContent = 'Tu proyecto necesita un nombre: ponlo en el Panel o en el generador de landings.'; return; }
+  if (c.draft.url && !/^https:\/\/[^\s]+$/i.test(c.draft.url)) { if (err) err.textContent = 'La dirección debe empezar por https://'; return; }
+  if (!hasPV()) { c.pub = Object.assign({ id: 'local', at: Date.now() }, post); LV.save(); LV.toast('Vista previa guardada en este navegador', 'check'); renderTab(); return; }
+  if (!PV.publish) { if (err) err.textContent = 'Tu servidor de comunidad no permite publicar.'; return; }
+  const b = $('#cm-pub'); if (b) b.disabled = true;
+  let html = ''; try { html = LV.gen().html; } catch (e) { html = ''; }
+  call(PV.publish, Object.assign({}, post, { landingHtml: html, id: c.pub && c.pub.id !== 'local' ? c.pub.id : undefined })).then((r) => { c.pub = Object.assign({}, post, { id: (r && r.id) || 'p', at: Date.now() }); LV.save(); cache.posts = null; LV.toast('Proyecto publicado en el muro', 'check'); renderTab(); load('mio'); })
+    .catch((e) => { if (b) b.disabled = false; if (err) err.textContent = 'No se pudo publicar: ' + errMsg(e); });
+};
+let unArm = 0, unT = 0;
+LV.ACT['com-unpub'] = function () {
+  const t = $('#cm-unpub-t'); if (!unArm) { unArm = 1; if (t) t.textContent = 'Pulsa otra vez para retirar'; clearTimeout(unT); unT = setTimeout(() => { unArm = 0; const q = $('#cm-unpub-t'); if (q) q.textContent = 'Retirar del muro'; }, 4000); return; }
+  unArm = 0; const c = com(), p = c.pub; if (!p) return;
+  const done = () => { c.pub = null; LV.save(); cache.posts = null; LV.toast('Proyecto retirado del muro', 'check'); renderTab(); };
+  if (hasPV() && p.id !== 'local' && PV.unpublish) call(PV.unpublish, p.id).then(done).catch((e) => { const er = $('#cm-pub-err'); if (er) er.textContent = 'No se pudo retirar: ' + errMsg(e); }); else done();
+};
+LV.ACT['com-psave'] = function () {
+  const c = com(), pr = c.prof, er = $('#cm-p-err'); if (er) er.textContent = '';
+  if (pr.vis !== 'private' && !cut(pr.alias, 40)) { if (er) er.textContent = 'Para ser visible necesitas un alias.'; return; }
+  if (pr.vis === 'contact' && !cut(pr.channel, 120)) { if (er) er.textContent = 'Para recibir solicitudes indica cómo contactarte (solo se comparte al aceptar).'; return; }
+  const sc = mySector(); const prof = { alias: cut(pr.alias, 40), bio: cut(pr.bio, 200), vis: pr.vis, looking: pr.looking.slice(0, 5), channel: cut(pr.channel, 120), sector: sc ? sc.id : '', model: myModel(), stage: pr.stage || stageGuess() };
+  pr.saved = Date.now(); LV.save();
+  if (!hasPV() || !PV.profile || !PV.profile.save) { LV.toast('Perfil guardado en este navegador', 'check'); renderTab(); return; }
+  const b = $('#cm-psave'); if (b) b.disabled = true;
+  call(PV.profile.save, prof).then(() => { LV.toast('Perfil guardado', 'check'); if (b) b.disabled = false; cache.people = null; }).catch((e) => { if (b) b.disabled = false; if (er) er.textContent = 'No se pudo guardar: ' + errMsg(e); });
+};
+let wArm = 0, wT = 0;
+LV.ACT['com-wipe'] = function () {
+  const t = $('#cm-wipe-t'); if (!wArm) { wArm = 1; if (t) t.textContent = 'Pulsa otra vez para borrar'; clearTimeout(wT); wT = setTimeout(() => { wArm = 0; const q = $('#cm-wipe-t'); if (q) q.textContent = 'Borrar mi perfil y mi publicación'; }, 4000); return; }
+  wArm = 0; const c = com(), p = c.pub;
+  const done = () => { S.com = fresh(); LV.save(); cache.posts = cache.people = cache.contacts = cache.prof = null; cache.fb = {}; LV.toast('Perfil y publicación borrados', 'check'); repaint(); };
+  const tasks = []; if (hasPV()) { if (p && p.id !== 'local' && PV.unpublish) tasks.push(call(PV.unpublish, p.id)); if (PV.profile && PV.profile.remove) tasks.push(call(PV.profile.remove)); }
+  Promise.all(tasks).then(done).catch((e) => { const er = $('#cm-p-err'); if (er) er.textContent = 'No se pudo borrar todo en el servidor: ' + errMsg(e); });
+};
+LV.ACT['com-resp'] = function (el) { if (!PV || !PV.contacts || !PV.contacts.respond) return; el.disabled = true; call(PV.contacts.respond, el.dataset.id, el.dataset.r === 'accept' ? 'accept' : 'decline').then(() => { fetchContacts(); LV.toast(el.dataset.r === 'accept' ? 'Solicitud aceptada' : 'Solicitud rechazada', 'check'); }).catch((e) => { el.disabled = false; LV.toast('No se pudo responder: ' + errMsg(e), 'alert'); }); };
+LV.ACT['com-cancel'] = function (el) { if (!PV || !PV.contacts || !PV.contacts.cancel) return; el.disabled = true; call(PV.contacts.cancel, el.dataset.id).then(() => { fetchContacts(); LV.toast('Solicitud cancelada', 'check'); }).catch((e) => { el.disabled = false; LV.toast('No se pudo cancelar: ' + errMsg(e), 'alert'); }); };
+
+/* entradas del formulario: se guardan al escribir, sin volver a dibujar (así no se pierde el foco) */
+document.addEventListener('input', (e) => {
+  const t = e.target; if (!t || !t.closest) return;
+  if (t.id === 'cm-q') { const c = com(); c.f.q = t.value.slice(0, 80); LV.save(); const x = $('[data-act="com-clear"]'); if (x) x.disabled = !filtersOn(c.f); clearTimeout(tq); tq = setTimeout(() => { if (hasPV()) load(c.tab); else renderList(); }, 260); return; }
+  if (t.id === 'cmf-t') { const n = $('#cmf-n'); if (n) n.textContent = String(t.value.length); return; }
+  if (t.id === 'cmr-t') { const n = $('#cmr-n'); if (n) n.textContent = String(t.value.length); return; }
+  if (t.dataset && t.dataset.p && t.type !== 'checkbox' && t.type !== 'radio') { com().prof[t.dataset.p] = t.value; LV.save(); }
+  if (t.dataset && t.dataset.d === 'url') { com().draft.url = t.value.slice(0, 200); LV.save(); }
+});
+document.addEventListener('change', (e) => {
+  const t = e.target; if (!t || !t.closest || !t.closest('#v-comunidad')) return;
+  const c = com();
+  if (t.dataset.f) { c.f[t.dataset.f] = t.value; LV.save(); if (hasPV()) load(c.tab); renderList(); return; }
+  if (t.id === 'cm-same') { c.f.same = t.checked; LV.save(); if (hasPV()) load(c.tab); renderList(); return; }
+  if (t.dataset.d === 'stage') { c.draft.stage = t.value; LV.save(); return; }
+  if (t.dataset.d === 'sector') { c.draft.sector = t.value; LV.save(); return; }
+  if (t.dataset.d === 'ask') { c.draft.ask = $$('input[data-d="ask"]:checked').map((x) => x.value); LV.save(); return; }
+  if (t.dataset.d === 'share') { const o = { V: false, R: false, C: false }; $$('input[data-d="share"]:checked').forEach((x) => { o[x.value] = true; }); c.draft.share = o; LV.save(); return; }
+  if (t.dataset.d === 'ok') { c.draft.ok = t.checked; LV.save(); const b = $('#cm-pub'); if (b) b.disabled = !t.checked; return; }
+  if (t.dataset.p === 'vis') { c.prof.vis = t.value; LV.save(); $$('.cm-vo').forEach((l) => l.classList.toggle('on', !!l.querySelector('input:checked'))); return; }
+  if (t.dataset.p === 'looking') { c.prof.looking = $$('input[data-p="looking"]:checked').map((x) => x.value); LV.save(); return; }
+  if (t.dataset.p) { c.prof[t.dataset.p] = t.value; LV.save(); }
+});
+document.addEventListener('keydown', (e) => {
+  const tb = e.target && e.target.closest && e.target.closest('.cm-tabs');
+  if (tb && (e.key === 'ArrowRight' || e.key === 'ArrowLeft')) { const b = $$('button', tb), i = b.indexOf(document.activeElement); if (i >= 0) { e.preventDefault(); const n = b[(i + (e.key === 'ArrowRight' ? 1 : b.length - 1)) % b.length]; n.focus(); n.click(); } return; }
+  const m = mdl(); if (!m || m.hidden) return;
+  if (e.key === 'Escape') { e.preventDefault(); closeModal(); return; }
+  if (e.key === 'Tab') {
+    const f = $$('button:not([disabled]),a[href],input,select,textarea,[tabindex]:not([tabindex="-1"])', m).filter((x) => x.offsetParent !== null);
+    if (!f.length) return; const first = f[0], last = f[f.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  }
+});
+document.addEventListener('click', (e) => { const m = mdl(); if (m && !m.hidden && e.target === m) closeModal(); });
+LV.hooks.plan = LV.hooks.plan || [];
+LV.hooks.plan.push(() => { if (!premium()) closeModal(); repaint(); });
+
+LV.community = {
+  /** Conecta tu servidor de comunidad (ver el contrato en la cabecera de este archivo). */
+  setProvider: function (p) { PV = p && typeof p === 'object' ? p : null; cache.posts = cache.people = cache.contacts = cache.prof = null; cache.fb = {}; cache.err = {}; cache.busy = {}; repaint(); },
+  hasProvider: hasPV, refresh: repaint,
+  summary: function () { const c = com(); return { tab: c.tab, published: !!c.pub, visibility: c.prof.vis, provider: hasPV() }; },
+};
+})();
+
+/* ============================================================
+   Centro de control (Hub de funciones): la pantalla a la que se llega justo después de elegir el modelo de negocio.
+   · Una tarjeta por módulo (icono, título, descripción y estado real) que abre esa sección al momento.
+   · Astro acompaña: da la bienvenida y sugiere por dónde empezar según lo que la persona ha contado y lo que ya ha hecho.
+   · Empieza en blanco: ningún dato de ejemplo. Los estados de las tarjetas salen siempre del proyecto real.
+   · API: LV.hub = { recommend, modules, refresh, open, start }
+   ============================================================ */
+(function () {
+'use strict';
+const { $, $$, esc, ic } = LV;
+const S = LV.state;
+
+const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+const norm = (t) => String(t || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim();
+const snip = (t, n) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : t; };
+const est = () => !!(S.est && S.est.touched);
+const ran = () => !!(S.compite && S.compite.ran);
+/** Texto de idea que la persona ha escrito (en el chat con Astro o en Compite). */
+const ideaTxt = () => { try { return (LV.agent && LV.agent.ideaText && LV.agent.ideaText()) || ''; } catch (e) { return ''; } };
+
+// ---------- los módulos del centro de control, en el orden de la ruta recomendada ----------
+const RIV = { // quién suele competir en cada modelo (descripción general, no un dato de mercado)
+  saas: 'En tu modelo: otras herramientas de software de tu nicho.',
+  trade: 'En tu modelo: comunidades, canales de señales y formación.',
+  serv: 'En tu modelo: freelances y agencias de tu nicho.',
+  shop: 'En tu modelo: tiendas y marcas del mismo producto.',
+  info: 'En tu modelo: cursos, comunidades y creadores de tu tema.',
+  otro: 'Detecto tu modelo a partir de la idea que cuentes.',
+};
+const MODS = [
+  { id: 'eco', to: 'compite', card: 'eco', ico: 'compite', t: 'Análisis de competencia', step: 1,
+    d: 'Tamaño del mercado, rivales y el hueco que puedes ocupar.',
+    m: (p) => RIV[p.id] || '',
+    s: () => (ran() ? ['ok', 'Informe listo'] : LV.hasIdea() ? ['acc', 'Listo para analizar'] : ['', 'Sin empezar']) },
+  { id: 'est', to: 'compite', card: 'est', ico: 'euro', t: 'Estrategia de precios y target', step: 2,
+    d: 'Cuánto cobrar y a quién. Y cuántos clientes necesitas para cubrir costes.',
+    m: (p) => (p.ad && p.ad[2] ? 'En tu modelo: ' + p.ad[2].charAt(0).toLowerCase() + p.ad[2].slice(1) : ''),
+    s: () => (est() ? ['ok', 'Probado'] : ran() ? ['acc', 'Por probar'] : ['', 'Tras el análisis']) },
+  { id: 'gen', to: 'genera', ico: 'genera', t: 'Generador de landings', step: 3,
+    d: 'Tu página de captación, con vista previa en directo y hecha para tu modelo.',
+    m: () => '',
+    s: () => (S.genera && S.genera.pub ? ['ok', 'Publicada'] : S.genera && (S.genera.visited || S.genera.tweaked) ? ['acc', 'En marcha'] : ['', 'Sin empezar']) },
+  { id: 'val', to: 'valida', ico: 'valida', t: 'Validación de demanda', step: 4,
+    d: 'Publica la landing y una encuesta. Mide si hay interés real antes de gastar.',
+    m: (p) => (p.ad && p.ad[1] ? 'En tu modelo: ' + p.ad[1].charAt(0).toLowerCase() + p.ad[1].slice(1) : ''),
+    s: () => { const v = LV.progress().valida; return v >= 100 ? ['ok', 'Completado'] : v > 0 ? ['acc', v + ' %'] : ['', 'Sin empezar']; } },
+  { id: 'lan', to: 'lanza', ico: 'lanza', t: 'Trámites y lanzamiento', step: 5,
+    d: 'Trámites, costes y plazos para arrancar con todo en orden.',
+    m: (p) => (p.lz ? 'En tu modelo: ' + p.lz[1].charAt(0).toLowerCase() + p.lz[1].slice(1) + '.' : ''),
+    s: () => { const v = LV.progress().lanza; return v >= 100 ? ['ok', 'Completado'] : v > 0 ? ['acc', v + ' %'] : ['', 'Sin empezar']; } },
+  { id: 'pan', to: 'panel', ico: 'home', t: 'Panel y decisión Go / No-Go', step: 0,
+    d: 'Tu progreso, tus métricas y el veredicto: ¿merece la pena seguir?',
+    m: () => '',
+    s: () => (LV.hasIdea() ? ['acc', LV.progress().total + ' %'] : ['', 'Sin datos']) },
+];
+const byId = (id) => MODS.find((m) => m.id === id);
+
+// ---------- recomendación de Astro: lo que ya has hecho manda; si no, lo que cuentas; si no, tu modelo ----------
+const WHY = { // por qué empezar por el análisis, según el modelo
+  saas: 'En software mandan el precio por plan y la baja mensual. Empieza viendo qué hacen los rivales.',
+  trade: 'En finanzas pesa la confianza. Mira qué ofrece el resto y dónde queda hueco, sin prometer rentabilidades.',
+  serv: 'Tus horas son tu límite. Mira cuánto cobran en tu nicho y a quién vendes.',
+  shop: 'El margen por pedido lo decide todo. Compara precios y rivales antes de comprar stock.',
+  info: 'Se produce una vez y se vende muchas. Mira qué cobran los cursos y comunidades de tu tema.',
+  otro: 'Cuéntame tu idea y detecto el modelo al que más se parece.',
+};
+const SH = { eco: 'Competencia', est: 'Precios y target', gen: 'Landings', val: 'Validación', lan: 'Trámites', pan: 'el Panel' }; // nombres cortos para botones
+function R(id, why, src) { const m = byId(id); return { id: id, to: m.to, card: m.card || '', title: m.t, sh: SH[id], why: why, src: src, ico: m.ico }; }
+function recommend(textIn) {
+  const k = (LV.model && LV.model.key && LV.model.key()) || '';
+  // 0) Con perfil y ruta personal, el siguiente paso de TU ruta que tenga módulo propio en la app
+  try {
+    const hs = LV.rt && LV.rt.hubStep();
+    if (hs && byId(hs.hub)) { const r0 = R(hs.hub, hs.step.t.replace(/[.:;]?$/, '.') + (hs.step.why ? ' ' + hs.step.why : ''), 'ruta'); r0.step = hs.step.id; return r0; }
+  } catch (e) { /* sin ruta: sigue la recomendación por estado */ }
+  // 1) Si ya hay trabajo hecho, el siguiente paso de la ruta
+  if (ran()) {
+    if (!est()) return R('est', 'Ya tienes tu análisis. Ahora prueba tu precio y tu público y mira cuántos clientes necesitas.', 'estado');
+    if (!(S.genera && S.genera.pub)) return R('gen', 'Con precio y público claros, crea tu landing y publícala para medir interés.', 'estado');
+    if (LV.progress().valida < 100) return R('val', 'Tu landing ya está en marcha. Anota visitas, registros y encuestas para ver si hay demanda.', 'estado');
+    if (!(S.lanza && S.lanza.biz)) return R('lan', 'Ya mides demanda. Ordena trámites, costes y plazos para arrancar.', 'estado');
+    return R('pan', 'Revisa tu progreso y la decisión Go / No-Go con lo que has anotado.', 'estado');
+  }
+  // 2) Lo que la persona ha contado de su proyecto
+  const raw = String(textIn != null ? textIn : ideaTxt() || '').trim() || (LV.hasIdea() ? S.idea.name.trim() + '. ' + S.idea.pitch.trim() : '');
+  const n = norm(raw + ' ' + (S.mdl && S.mdl.custom ? S.mdl.custom : ''));
+  const q = raw ? '«' + snip(raw, 64) + '»' : '';
+  if (n) {
+    if (/\b(landing|pagina de ventas|pagina de captacion|mi pagina|sitio web|crear (una )?web)\b/.test(n)) return R('gen', 'Me hablas de tu página (' + q + '): en el generador la escribes y la ves en directo.', 'idea');
+    if (/(tramites|papeleo|darme de alta|constituir|sociedad limitada|gestoria|licencia|cnmv|rgpd)/.test(n)) return R('lan', 'Mencionas trámites o papeleo (' + q + '): en Lanza tienes la ruta con costes y plazos.', 'idea');
+    if (/(validar|validacion|encuesta|lista de espera|preventa|pre-venta|comprobar (la )?demanda|hay demanda)/.test(n)) return R('val', 'Quieres comprobar si hay demanda (' + q + '): Valida mide visitas, registros y encuestas.', 'idea');
+    const price = /(precio|cobrar|cobraria|tarifa|cuota|suscripcion|margen|cliente ideal|publico|target)/.test(n);
+    return R('eco', q + ': ' + (price ? 'el análisis también calcula tu rango de precio, tu público y cuántos clientes necesitas.' : 'empieza viendo el mercado, los rivales y los huecos; de ahí salen también tu precio y tu público.'), 'idea');
+  }
+  // 3) Sin nada más, el primer paso de la ruta, explicado según el modelo
+  return R('eco', WHY[k] || 'Es el primer paso de la ruta: mercado, rivales y huecos para tu idea.', 'modelo');
+}
+
+// ---------- dibujo ----------
+function astroMark() { // constelación diminuta: el rostro de Astro
+  return '<svg class="hub-astro-mk" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><path d="M8 29 15 15 24 22 32 9" fill="none" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity=".55"/><circle cx="8" cy="29" r="2.4" fill="currentColor"/><circle cx="15" cy="15" r="2" fill="currentColor"/><circle cx="24" cy="22" r="2.8" fill="currentColor"/><circle cx="32" cy="9" r="2.1" fill="currentColor"/><circle cx="31" cy="30" r="1.3" fill="currentColor" opacity=".7"/></svg>';
+}
+function cardHtml(m, i, rec) {
+  const p = LV.mp(), st = m.s(), on = rec && rec.id === m.id, line = m.m ? m.m(p) : '';
+  return '<button class="hub-c' + (on ? ' is-rec' : '') + '" type="button" data-act="hub-open" data-id="' + m.id + '" data-to="' + m.to + '"' + (m.card ? ' data-card="' + m.card + '"' : '') + ' style="--i:' + i + '"' +
+    ' aria-label="' + esc(m.t + '. ' + st[1] + (on ? '. Recomendado por Astro' : '') + '. Abrir') + '">' +
+    '<span class="hub-c-top"><span class="hub-ic">' + ic(m.ico) + '</span><span class="hub-step' + (m.step ? '' : ' alt') + '">' + (m.step ? 'Paso ' + m.step : 'Siempre a mano') + '</span></span>' +
+    '<span class="hub-c-t">' + esc(m.t) + '</span>' +
+    '<span class="hub-c-d">' + esc(m.d) + '</span>' +
+    (line ? '<span class="hub-c-m">' + ic('bolt', 'sm') + '<span>' + esc(line) + '</span></span>' : '') +
+    '<span class="hub-c-f"><span class="chip ' + st[0] + '">' + esc(st[1]) + '</span>' + (on ? '<span class="chip gold">' + ic('star', 'sm') + 'Recomendado</span>' : '') + '<span class="hub-go">Abrir' + ic('right', 'sm') + '</span></span></button>';
+}
+function astroHtml(rec) {
+  const first = !ran() && !LV.hasIdea() && rec.src !== 'idea';
+  const lead = rec.src === 'ruta' ? 'Siguiente paso de tu ruta' : rec.src === 'estado' ? 'Tu siguiente paso' : 'Astro te sugiere';
+  return '<div class="hub-astro" id="hub-astro" role="region" aria-label="Sugerencia de Astro">' + astroMark() +
+    '<div class="hub-astro-b"><small>' + lead + '</small><b>' + (rec.src === 'estado' || rec.src === 'ruta' ? esc(rec.title) : 'Empieza por «' + esc(rec.title) + '»') + '</b>' +
+    '<span>' + esc(rec.why) + '</span>' + (first ? '<em>¿Ya tienes una idea en mente? Cuéntasela a Astro y ajusto la sugerencia.</em>' : '') + '</div>' +
+    '<div class="hub-astro-a"><button class="btn pri" type="button" data-act="hub-start">' + ic(rec.ico, 'sm') + 'Empezar' + ic('right', 'sm') + '</button>' +
+    '<button class="btn ghost" type="button" data-act="hub-ask">Hablar con Astro</button></div></div>';
+}
+LV.RENDER.hub = function () {
+  const el = $('#v-hub'); if (!el) return;
+  const p = LV.mp(), has = !!(LV.model && LV.model.key && LV.model.key()), rec = recommend();
+  const nm = S.idea.name.trim(), me = S.me || {}, who = me.done && me.name ? me.name.split(' ')[0] : '';
+  el.innerHTML =
+    '<section class="hub-hero"><div class="hub-hero-t">' +
+      '<div class="chips">' + (has ? '<span class="chip acc">' + ic(p.ic, 'sm') + esc(LV.model.label()) + '</span>' : '') + (nm ? '<span class="chip">' + esc(nm) + '</span>' : '') +
+      (has ? '<button class="chip hub-chg" type="button" data-act="model-change">' + ic('swap', 'sm') + 'Cambiar modelo</button>' : '') + '</div>' +
+      '<h2>' + (who ? esc(who) + ', ¿por dónde seguimos?' : '¿Por dónde quieres empezar?') + '</h2>' +
+      '<p>Todo para validar tu idea, en un solo sitio. Toca un módulo y empieza. Vuelves aquí desde el menú cuando quieras.</p></div>' +
+      astroHtml(rec) + '</section>' +
+    (LV.rt ? LV.rt.cardHtml() : '') +
+    '<div class="hub-g" id="hub-g">' + MODS.map((m, i) => cardHtml(m, i, rec)).join('') + '</div>' +
+    (LV.premium ? LV.premium.hubHtml() : '') +
+    '<p class="fine hub-fine">Empiezas desde cero: solo verás lo que escribas tú. Las cifras de ValidLance son estimaciones, no datos reales de mercado ni asesoramiento legal o financiero.</p>';
+  LV.applyProto();
+};
+let rT = 0;
+/** Reajusta solo la sugerencia y la tarjeta recomendada (p. ej. cuando Astro aprende la idea en el chat). */
+function refresh() {
+  clearTimeout(rT);
+  rT = setTimeout(() => {
+    if (S.view !== 'hub' || !$('#hub-astro')) return;
+    const rec = recommend(), cur = $('#hub-astro');
+    const act = document.activeElement;
+    if (act && cur.contains(act)) return; // no se mueve el foco de quien navega con teclado
+    cur.outerHTML = astroHtml(rec);
+    if (LV.rt) LV.rt.paint(true);
+    $$('.hub-c').forEach((b, i) => { const m = byId(b.dataset.id); if (m) b.outerHTML = cardHtml(m, i, rec).replace('class="hub-c', 'class="hub-c seen'); });
+  }, 140);
+}
+
+// ---------- acciones ----------
+function openMod(to, card) {
+  LV.go(to);
+  if (S.view !== to) return; // sigue en el centro si aún falta elegir modelo
+  const v = $('#v-' + to);
+  if (v && !reduced()) { v.classList.remove('hub-arrive'); void v.offsetWidth; v.classList.add('hub-arrive'); setTimeout(() => v.classList.remove('hub-arrive'), 560); }
+  if (card && to === 'compite' && ran() && LV.inf && LV.inf.openTo) { try { LV.inf.openTo(card); } catch (e) { /* la tarjeta no existe aún */ } }
+}
+LV.ACT['hub-open'] = function (el) { openMod(el.dataset.to, el.dataset.card); };
+LV.ACT['hub-start'] = function () { const r = recommend(); openMod(r.to, r.card); };
+LV.ACT['hub-ask'] = function () { try { if (LV.agent && LV.agent.open) LV.agent.open(); } catch (e) { /* sin asistente */ } };
+
+LV.hub = { recommend: recommend, modules: MODS, refresh: refresh, open: openMod, start: function () { LV.ACT['hub-start'](); } };
+})();
+
+/* ============================================================
    Modelo de negocio: pantalla de entrada obligatoria, perfil activo y adaptación de la app.
    · El modelo elegido vive en LV.state.mdl y se guarda con el resto del proyecto.
    · Cada perfil (LV.MP) aporta vocabulario, nombres de métricas, umbrales orientativos,
@@ -8344,7 +9611,7 @@ function open(m) {
   lastFocus = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
   build(); fill();
   root.classList.remove('go'); root.hidden = false; root.classList.remove('show'); void root.offsetWidth; root.classList.add('show');
-  lockApp(true);
+  lockApp(true); LV.applyTheme(); // la elección de modelo siempre va en oscuro
   if (splashUp()) root.setAttribute('inert', ''); else { root.removeAttribute('inert'); focusIn(); }
 }
 /** Al abrir: el foco va al título (nunca a una tarjeta sin elegir, para que ninguna parezca preseleccionada); si ya hay modelo, a la tarjeta activa. */
@@ -8352,6 +9619,7 @@ function focusIn() { const c = $('.mc.on', root) || $('#mdl-t', root); if (c) { 
 function close(restore) {
   root.hidden = true; root.classList.remove('go', 'show');
   if (restore) { lockApp(false); }
+  LV.applyTheme(); // al cerrarse, la vista de debajo recupera su tema (el Centro de control sigue en oscuro)
 }
 function confirm() {
   if (!sel || busy || root.classList.contains('go')) return;
@@ -8369,8 +9637,9 @@ function confirm() {
   const app = $('#app');
   const fast = reduceMotion();
   lockApp(false); app.classList.remove('pre');
-  const target = first ? 'panel' : (S.view || 'panel');
-  S.view = target; LV.go(target); paint(); // primero el trabajo pesado (dibujar el panel), después se anima: así la transición no se entrecorta
+  const solo = app.classList.contains('solo') ? app.dataset.solo : '';
+  const target = solo || (first ? 'hub' : (S.view || 'hub')); // la primera vez, justo después de elegir modelo, se llega al Centro de control
+  S.view = target; LV.go(target); paint(); // primero el trabajo pesado (dibujar el centro de control), después se anima: así la transición no se entrecorta
   const run = () => {
     if (!fast) { app.classList.add('enter'); setTimeout(() => app.classList.remove('enter'), 900); }
     root.classList.add('go');
@@ -8432,9 +9701,605 @@ LV.model = {
   /** Al arrancar: si falta el modelo, la pantalla de selección queda lista debajo de la pantalla de inicio. */
   boot: function () { apply(); paint(); if (needs()) open('first'); },
   /** La pantalla de inicio ha terminado: se activa la selección y se lleva el foco a ella. */
-  splashDone: function () { if (root && !root.hidden) { root.removeAttribute('inert'); focusIn(); } },
+  splashDone: function () { if (LV.me && LV.me.active()) return; /* primero la bienvenida de Astro; el foco pasa aquí al cerrarla */ if (root && !root.hidden) { root.removeAttribute('inert'); focusIn(); } },
   structName: function (id) { const s = structs().find((x) => x.id === id); return s ? s.n : ''; },
 };
+})();
+
+/* ============================================================
+   Hoja de ruta adaptativa de Astro
+   · Entrada: el perfil de la persona (nombre, situación, objetivo, tiempo, capital) + lo que ya hay en la app (modelo, idea, informe, landing…).
+   · Salida: fases y pasos con horas, módulo de la app donde se hace y un reparto por semanas que cabe en SU tiempo disponible.
+   · Determinista y sin red: mismo perfil + mismo estado = misma ruta. Los pasos hechos se guardan aparte (por id) y sobreviven a los reajustes.
+   · Sin DOM: se puede probar con Node.   API: LV.route.{OPTS, build, sig, auto, progress, next, week, slots, parse, label, capEur, hours}
+   ============================================================ */
+(function () {
+'use strict';
+
+// ---------- opciones del onboarding (las usan la pantalla, el perfil y Astro) ----------
+const OPTS = {
+  occ: [
+    { id: 'est', l: 'Estudio', s: 'Grado, FP, máster u oposición' },
+    { id: 'emp', l: 'Trabajo por cuenta ajena', s: 'Tengo empleo y poco tiempo libre' },
+    { id: 'aut', l: 'Soy autónomo/a', s: 'Ya facturo por mi cuenta' },
+    { id: 'paro', l: 'Busco trabajo', s: 'Tengo tiempo para dedicarle' },
+    { id: 'otra', l: 'Otra situación', s: '' },
+  ],
+  res: [
+    { id: 'nov', l: 'Primera vez emprendiendo' },
+    { id: 'exp', l: 'Ya he emprendido antes' },
+    { id: 'tec', l: 'Sé programar o diseñar' },
+    { id: 'soc', l: 'Tengo socio/a o equipo' },
+    { id: 'red', l: 'Tengo contactos en el sector' },
+  ],
+  goal: [
+    { id: 'extra', l: 'Ingresos extra', s: 'Compaginarlo con lo que hago' },
+    { id: 'vivir', l: 'Vivir de mi negocio', s: 'Que sea mi trabajo' },
+    { id: 'validar', l: 'Validar una idea sin riesgo', s: 'Saber si merece la pena' },
+    { id: 'clase', l: 'Proyecto de clase o TFG', s: 'Con entrega y presentación' },
+    { id: 'crecer', l: 'Montar algo grande', s: 'Una startup con ambición de crecer' },
+  ],
+  hours: [
+    { id: 3, l: 'Hasta 3 h', s: 'a la semana' }, { id: 6, l: '4 a 8 h', s: 'a la semana' }, { id: 12, l: '9 a 15 h', s: 'a la semana' },
+    { id: 22, l: '16 a 30 h', s: 'a la semana' }, { id: 35, l: 'Más de 30 h', s: 'a la semana' },
+  ],
+  when: [{ id: 'man', l: 'Mañanas' }, { id: 'tar', l: 'Tardes' }, { id: 'noc', l: 'Noches' }, { id: 'fin', l: 'Fines de semana' }],
+  cap: [
+    { id: 'c0', l: 'Casi nada', s: 'Empiezo sin gastar' }, { id: 'c1', l: 'Hasta 500 €', s: '' },
+    { id: 'c2', l: '500 a 3.000 €', s: '' }, { id: 'c3', l: 'Más de 3.000 €', s: '' },
+  ],
+};
+const CAPV = { c0: 0, c1: 300, c2: 1500, c3: 5000 };
+const label = (kind, id) => { const o = (OPTS[kind] || []).find((x) => String(x.id) === String(id)); return o ? o.l : ''; };
+const capEur = (me) => (me && CAPV[me.cap] != null ? CAPV[me.cap] : null);
+const hoursOf = (me) => { const h = me && Number(me.hours); return h > 0 ? h : 5; };
+const has = (me, id) => !!(me && Array.isArray(me.res) && me.res.indexOf(id) >= 0);
+const round5 = (n) => Math.max(0, Math.round(n / 50) * 50);
+
+// ---------- pasos por tipo de negocio ----------
+const MVP = {
+  saas: ['Haz una maqueta o un prototipo sin código y pruébalo con 5 personas de tu público', 6, 'Software: se valida con una maqueta antes de programar.'],
+  shop: ['Pide muestras o un lote mínimo y haz buenas fotos del producto', 5, 'Producto físico: no compres stock hasta que alguien pague.'],
+  serv: ['Define un paquete cerrado de servicio, con precio y plazo', 2, 'Servicios: un paquete claro se vende mejor que «hago de todo».'],
+  info: ['Esquematiza tu curso o guía y haz una sesión piloto gratis con 5 personas', 5, 'Formación: el piloto te dice qué se entiende y qué falta.'],
+  trade: ['Documenta tu método y pruébalo en simulación; no operes con dinero real hasta tener resultados', 6, 'Finanzas: sin promesas de rentabilidad y con prudencia.'],
+  crea: ['Publica 10 piezas en una sola plataforma, con un tema claro', 8, 'Contenido: la constancia en un nicho pesa más que la variedad.'],
+};
+const FIRST = {
+  saas: 'Consigue 3 personas que paguen, o prometan pagar por adelantado',
+  shop: 'Vende tus primeras 10 unidades a tu círculo y a comunidades de tu público',
+  serv: 'Cierra tus 3 primeros clientes a precio de lanzamiento',
+  info: 'Abre la preventa con lista de espera y cobra a las primeras personas',
+  trade: 'Publica contenido educativo (sin prometer rentabilidades) y mide cuánta gente se apunta',
+  crea: 'Consigue tus primeros 100 seguidores fieles y tu primer ingreso (afiliación o colaboración)',
+};
+
+function build(me, cx) {
+  me = me || {}; cx = cx || {};
+  const fam = cx.fam && cx.fam !== 'gen' ? cx.fam : '', H = hoursOf(me), cap = me.cap || '', capv = capEur(me);
+  const emp = me.occ === 'emp', est = me.occ === 'est', paro = me.occ === 'paro', nov = has(me, 'nov') || !(has(me, 'exp')), exp = has(me, 'exp'), soc = has(me, 'soc');
+  const goal = me.goal || '', low = H <= 3;
+  const S = []; // pasos: {id, ph, t, h, mod, why}
+  const add = (id, ph, t, h, mod, why, min) => S.push({ id: id, ph: ph, t: t, h: Math.max(0.5, Math.round(h * 2) / 2), mod: mod || '', why: why || '', min: min || 0 }); // min: semanas de calendario que dura (esperar respuestas, visitas…)
+
+  // Fase 1 · Idea y mercado
+  if (nov && !exp) add('learn', 1, 'Lee la guía de Astro y entiende los 5 números que mandan: precio, coste por cliente, margen, clientes necesarios y plazo', 1.5, '', 'Con estos números sabrás si tu idea sale a cuenta.');
+  if (!cx.idea) add('idea', 1, 'Escribe tu idea en una frase: qué vendes, a quién y cuánto cobrarías', 0.5, 'compite', 'Sin una idea concreta no hay nada que validar.');
+  add('compete', 1, 'Genera el análisis en Compite y lee el resumen: mercado, rivales y hueco', 1, 'compite', 'Te dice si el mercado es grande y si hay sitio para ti.');
+  if (goal === 'vivir') add('income', 1, 'Calcula cuántos clientes necesitas para llegar a tus ingresos objetivo', 1, 'compite', 'Tu objetivo mensual se traduce en un número de clientes.');
+  add('price', 1, 'Prueba tu precio y tu público en Estrategia', 1.5, 'compite', 'El precio decide el margen y cuántos clientes necesitas.');
+  add('talk', 1, 'Habla con 10 personas de tu público: pregunta cómo lo resuelven hoy, no vendas', 4, 'valida', 'Es la señal más barata y más fiable de que el problema existe.', 1);
+
+  // Fase 2 · Prueba de demanda
+  add('land', 2, 'Crea tu landing en Genera con un titular claro y un solo botón', 2, 'genera', 'Es tu escaparate de pruebas: mide interés antes de construir.');
+  add('survey', 2, 'Prepara la encuesta de Valida (10 preguntas cortas)', 1, 'valida', 'Convierte opiniones en números.');
+  let traffic, th = 3;
+  if (cap === 'c0' || capv === 0) traffic = 'Consigue tus primeras 100 visitas sin gastar: tu círculo, 3 comunidades donde esté tu público y 20 mensajes directos';
+  else if (cap === 'c1') traffic = 'Consigue tus primeras 100 visitas con tu círculo y comunidades; si quieres, prueba un anuncio de hasta 50 €';
+  else if (capv) { const b = Math.min(300, Math.max(100, round5(capv * 0.1))); traffic = 'Consigue tus primeras 100 visitas con tu círculo y un anuncio de prueba de hasta ' + b + ' € (nunca más del 10 % de tu capital antes de ver demanda)'; th = 3.5; }
+  else traffic = 'Consigue tus primeras 100 visitas: tu círculo, comunidades de tu público y mensajes directos; gasta solo si ya hay señal';
+  add('traffic', 2, traffic, th, 'valida', 'Con menos de 100 visitas las cifras engañan.', 2);
+  add('measure', 2, 'Anota visitas, registros y respuestas en Valida y mira el veredicto', 1, 'valida', 'Decides con datos, no con intuición.');
+  if (!low || cap !== 'c0') add('presell', 2, 'Pide un pago simbólico o una preventa a quien dijo que sí', 2, 'valida', 'Pagar es la prueba de demanda más fuerte.', 1);
+
+  // Fase 3 · Decisión
+  add('decide', 3, 'Revisa el Go / No-Go del Panel y decide: seguir, ajustar o parar', 1, 'panel', 'Parar a tiempo también es un buen resultado.');
+
+  // Fase 4 · Lanzamiento
+  const m = (fam && MVP[fam]) || ['Haz la versión mínima de tu oferta y pruébala con 5 personas', 4, 'Lo mínimo que se puede vender hoy.'];
+  add('mvp', 4, m[0], m[1], '', m[2], 1);
+  if (soc) add('roles', 4, 'Reparte quién habla con clientes, quién construye y quién cuida el dinero', 1, '', 'Con socios, lo no hablado se convierte en conflicto.');
+  add('legal', 4, emp ? 'Mira los trámites en Lanza y comprueba antes si tu contrato permite tener un negocio propio' : 'Mira los trámites y costes de tu modelo en Lanza', 1.5, 'lanza', emp ? 'Compaginar empleo y negocio exige revisar tu contrato; consúltalo con una gestoría o con tu empresa.' : 'Lo mínimo para empezar en orden; confírmalo con una gestoría.');
+  add('first', 4, FIRST[fam] || 'Consigue tus 3 primeros clientes de pago', 6, '', 'Tres clientes que pagan valen más que mil visitas.', 3);
+  if (est && goal === 'clase') add('present', 4, 'Prepara la entrega: tus números, lo que aprendiste y la decisión Go / No-Go', 3, 'panel', 'Es lo que valora tu profesorado.');
+  add('review', 4, 'Haz una revisión semanal de 20 minutos: qué probé, qué aprendí, qué cambio', 0.5, '', 'Un hábito pequeño mantiene el ritmo.');
+
+  // reparto por semanas: lo que cabe en el tiempo disponible (80 %: hay imprevistos)
+  const cap_w = Math.max(1.5, Math.round(H * 0.8 * 2) / 2);
+  let w = 1, used = 0; const weeks = [{ n: 1, h: 0, ids: [] }];
+  S.forEach((s) => {
+    let left = s.h, first = true;
+    while (left > 0) {
+      if (used >= cap_w - 0.01) { w++; used = 0; weeks.push({ n: w, h: 0, ids: [] }); }
+      const take = Math.min(left, cap_w - used); used += take; left -= take;
+      const wk = weeks[weeks.length - 1]; wk.h += take; if (wk.ids.indexOf(s.id) < 0) wk.ids.push(s.id);
+      if (first) { s.w = w; first = false; } s.we = w;
+    }
+    if (s.min && s.we < s.w + s.min - 1) { // hay que esperar (respuestas, visitas, primeras ventas): el siguiente paso empieza después
+      s.we = s.w + s.min - 1;
+      while (weeks.length < s.we) weeks.push({ n: weeks.length + 1, h: 0, ids: [s.id], wait: true });
+      w = s.we; used = cap_w;
+    }
+  });
+  const total = S.reduce((a, s) => a + s.h, 0), nW = weeks.length;
+  const PH = [
+    { id: 1, t: 'Idea y mercado', goal: 'Saber si hay un problema real y sitio para ti' },
+    { id: 2, t: 'Prueba de demanda', goal: 'Comprobar con datos que alguien lo quiere' },
+    { id: 3, t: 'Decisión', goal: 'Seguir, ajustar o parar con criterio' },
+    { id: 4, t: 'Lanzamiento', goal: 'Primeros clientes y trámites mínimos' },
+  ].map((p) => { const st = S.filter((s) => s.ph === p.id); return Object.assign({ steps: st, w0: st.length ? st[0].w : 0, w1: st.length ? st[st.length - 1].we : 0, h: st.reduce((a, s) => a + s.h, 0) }, p); });
+
+  const notes = [];
+  if (low) notes.push('Con hasta 3 h a la semana, haz **una sola cosa por semana** y no abras frentes nuevos.');
+  if (nW > 18) notes.push('A este ritmo tardarías ≈ ' + nW + ' semanas. Propuesta: quédate con la **prueba mínima** (landing + 30 respuestas) y decide con eso.');
+  if (emp) notes.push('Tienes empleo: **no lo dejes** hasta tener clientes de pago estables y gastos de unos meses ahorrados.');
+  if (est) notes.push('Estudias: en semanas de exámenes baja a **1 bloque** y retoma después; la ruta se desplaza, no se pierde.');
+  if (cap === 'c0') notes.push('Sin presupuesto: usa solo canales gratuitos hasta que haya demanda demostrada.');
+  else if (capv) notes.push('Capital: **no gastes más del 20 %** antes de tener una señal clara de demanda.');
+  if (soc) notes.push('Con socio/a: acordad por escrito el reparto de tareas y de beneficios.');
+  return { v: 1, fam: fam, hours: H, usable: cap_w, total: total, weeks: weeks, nWeeks: nW, phases: PH, steps: S, notes: notes, block: blockMin(H), nBlocks: Math.max(1, Math.round(H / (blockMin(H) / 60))) };
+}
+/** Duración recomendada de cada bloque de trabajo, en minutos, según el tiempo semanal. */
+function blockMin(H) { return H <= 3 ? 60 : H <= 8 ? 90 : 120; }
+
+/** Huella de lo que condiciona la ruta: si cambia, la ruta se recalcula (los pasos hechos se conservan por id). */
+function sig(me, cx) { me = me || {}; cx = cx || {}; return [me.occ, (me.res || []).slice().sort().join('+'), me.goal, me.hours, me.cap, cx.fam || '', cx.idea ? 1 : 0].join('|'); }
+
+/** Pasos que la app ya da por hechos según el estado real del proyecto (se marcan solos). */
+function auto(cx) {
+  cx = cx || {}; const o = {}, P = cx.progress || {};
+  if (cx.idea) o.idea = 1;
+  if (cx.ran) { o.compete = 1; o.income = cx.est ? 1 : 0; }
+  if (cx.est) o.price = 1;
+  if (cx.landPub || cx.landVisited) o.land = cx.landPub ? 1 : 0;
+  if ((P.valida || 0) >= 100) { o.survey = 1; o.traffic = 1; o.measure = 1; }
+  else if ((P.valida || 0) >= 40) { o.survey = 1; }
+  if ((P.lanza || 0) >= 40) o.legal = 1;
+  Object.keys(o).forEach((k) => { if (!o[k]) delete o[k]; });
+  return o;
+}
+const isDone = (id, done, au) => !!((done && done[id]) || (au && au[id]));
+/** {n, total, pct, h, hTotal} del avance (los pasos hechos solos o a mano cuentan igual). */
+function progress(R, done, au) {
+  let n = 0, h = 0; R.steps.forEach((s) => { if (isDone(s.id, done, au)) { n++; h += s.h; } });
+  return { n: n, total: R.steps.length, pct: Math.round(100 * h / Math.max(1, R.total)), h: h, hTotal: R.total };
+}
+/** Los próximos k pasos sin hacer, en orden de ruta. */
+function next(R, done, au, k) { return R.steps.filter((s) => !isDone(s.id, done, au)).slice(0, k || 3); }
+/** Pasos de la semana actual (la primera semana con algo pendiente) y qué semana es. */
+function week(R, done, au) {
+  const pend = R.steps.filter((s) => !isDone(s.id, done, au)); if (!pend.length) return { n: 0, steps: [], h: 0 };
+  const n = pend[0].w, st = pend.filter((s) => s.w <= n && s.we >= n);
+  return { n: n, steps: st, h: Math.min(R.usable, st.reduce((a, s) => a + s.h, 0)) };
+}
+
+// ---------- huecos de trabajo sugeridos según cuándo puede la persona ----------
+const DAYS = { man: [['Lun', 'por la mañana'], ['Mié', 'por la mañana'], ['Vie', 'por la mañana']], tar: [['Mar', 'por la tarde'], ['Jue', 'por la tarde'], ['Lun', 'por la tarde']], noc: [['Lun', 'por la noche'], ['Mié', 'por la noche'], ['Jue', 'por la noche']], fin: [['Sáb', 'por la mañana'], ['Dom', 'por la tarde']] };
+function slots(me, R) {
+  const wh = (me && me.when && me.when.length ? me.when : (me && me.occ === 'emp' ? ['noc', 'fin'] : me && me.occ === 'est' ? ['tar', 'fin'] : ['man', 'tar'])).filter((x) => DAYS[x]);
+  const need = R ? R.nBlocks : 2, out = [], seen = {};
+  for (let i = 0; out.length < need && i < 8; i++) {
+    const g = wh[i % wh.length], arr = DAYS[g], pick = arr[Math.floor(i / wh.length) % arr.length], key = pick.join(' ');
+    if (!seen[key]) { seen[key] = 1; out.push(pick[0] + ' ' + pick[1]); }
+  }
+  return out;
+}
+
+// ---------- cambios en lenguaje natural («ahora tengo 5 horas», «no tengo dinero», «trabajo por las tardes») ----------
+const NUMW = { un: 1, una: 1, dos: 2, tres: 3, cuatro: 4, cinco: 5, seis: 6, siete: 7, ocho: 8, nueve: 9, diez: 10, doce: 12, quince: 15, veinte: 20, treinta: 30 };
+const toNum = (s) => { s = String(s).replace(/\./g, '').replace(',', '.'); const n = parseFloat(s); return isFinite(n) ? n : (NUMW[s] != null ? NUMW[s] : NaN); };
+const bucketH = (h) => (h <= 3 ? 3 : h <= 8 ? 6 : h <= 15 ? 12 : h <= 30 ? 22 : 35);
+const bucketC = (e) => (e <= 0 ? 'c0' : e <= 500 ? 'c1' : e <= 3000 ? 'c2' : 'c3');
+/** n = texto normalizado (minúsculas, sin tildes). Devuelve {patch, said:[frases]} con lo que cambia en el perfil, o null. */
+function parse(n) {
+  n = String(n || ''); const p = {}, said = [];
+  let m = n.match(/\b(\d+(?:[.,]\d+)?|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|diez|doce|quince|veinte|treinta)\s*(?:h\b|horas?|hs\b)\s*(?:a la semana|semanales|por semana|\/\s*semana|a la sem)?/);
+  if (m && /(a la semana|semanal|por semana|\/\s*semana|a la sem|al dia|por dia|cada dia|diari|dispongo|dedic)/.test(n) && !/\b(hoy|ahora mismo|este rato|un rato|esta (tarde|noche|manana))\b/.test(n)) { let h = toNum(m[1]); if (/(al dia|diari|por dia|cada dia)/.test(n)) h *= 5; if (h > 0 && h <= 80) { p.hours = bucketH(h); said.push('**' + Math.round(h) + ' h** a la semana'); } }
+  if (!p.hours && /(no tengo (casi )?tiempo|poco tiempo|ando justo de tiempo|tengo muy poco tiempo|apenas tengo tiempo)/.test(n)) { p.hours = 3; said.push('**poco tiempo** (hasta 3 h a la semana)'); }
+  if (!p.hours && /(tengo mucho tiempo|todo el dia|dedicacion completa|jornada completa|a tiempo completo|a jornada completa)/.test(n) && /(tiempo|dedic|puedo)/.test(n)) { p.hours = 35; said.push('**mucho tiempo** (más de 30 h a la semana)'); }
+  m = n.match(/\b(\d+(?:[.,]\d{3})*(?:[.,]\d+)?)\s*(?:€|euros?|eur)\b/);
+  if (m && /(tengo|dispongo|cuento con|ahorr|presupuesto|capital|invertir|invierto)/.test(n) && !/(cobr|precio|cuesta|vale)/.test(n)) { const e = toNum(m[1]); if (e >= 0 && e < 1e7) { p.cap = bucketC(e); said.push('un capital de **≈ ' + Math.round(e).toLocaleString('es-ES') + ' €**'); } }
+  if (!p.cap && /(no tengo (nada de )?(dinero|capital|presupuesto|ahorros)|sin (dinero|presupuesto|capital)|cero euros|0 euros|estoy sin blanca|ando sin dinero)/.test(n)) { p.cap = 'c0'; said.push('**casi sin presupuesto**'); }
+  if (!p.cap && /(tengo (bastante |mucho )?(dinero|ahorros|capital) para invertir|puedo invertir bastante)/.test(n)) { p.cap = 'c2'; said.push('**capital para invertir**'); }
+  if (/(he empezado a trabajar|ahora trabajo|consegui (un )?(trabajo|empleo)|tengo (un )?(trabajo|empleo)|trabajo (a jornada|por cuenta|en una|todo el dia|de \d))/.test(n)) { p.occ = 'emp'; said.push('que **trabajas por cuenta ajena**'); }
+  else if (/(estoy estudiando|soy estudiante|tengo examenes|estoy en la uni|estoy en el instituto|estoy en la universidad)/.test(n)) { p.occ = 'est'; said.push('que **estudias**'); }
+  else if (/(me he quedado sin trabajo|estoy en paro|busco trabajo|estoy buscando trabajo|me han despedido)/.test(n)) { p.occ = 'paro'; said.push('que **buscas trabajo**'); }
+  else if (/(soy autonomo|soy autonoma|ya facturo|trabajo por mi cuenta)/.test(n)) { p.occ = 'aut'; said.push('que **eres autónomo/a**'); }
+  if (/(solo (puedo )?(por las )?noches|por las noches|de noche)/.test(n) && /(puedo|trabajo|tengo|solo|libre|dedico)/.test(n)) { p.when = ['noc']; said.push('que trabajas **por las noches**'); }
+  else if (/(fines de semana|findes|sabados y domingos|solo el finde)/.test(n) && /(puedo|solo|libre|dedico|tengo)/.test(n)) { p.when = ['fin']; said.push('que dispones de **fines de semana**'); }
+  else if (/(por las tardes|solo (por )?(la )?tarde|tardes libres)/.test(n) && /(puedo|solo|libre|dedico|tengo)/.test(n)) { p.when = ['tar']; said.push('que dispones de **tardes**'); }
+  else if (/(por las mananas|solo (por )?(la )?manana|mananas libres)/.test(n) && /(puedo|solo|libre|dedico|tengo)/.test(n)) { p.when = ['man']; said.push('que dispones de **mañanas**'); }
+  if (/(quiero vivir de|vivir de esto|dejar mi trabajo|ser mi trabajo principal)/.test(n) && !p.goal) { p.goal = 'vivir'; said.push('que quieres **vivir de tu negocio**'); }
+  else if (/(ingresos extra|dinero extra|complementar|un extra|sacarme un sobresueldo)/.test(n)) { p.goal = 'extra'; said.push('que buscas **ingresos extra**'); }
+  else if (/(es para (clase|la uni|un trabajo de clase|mi tfg|el tfg)|trabajo de clase|proyecto de clase|mi tfg)/.test(n)) { p.goal = 'clase'; said.push('que es **un proyecto de clase**'); }
+  return said.length ? { patch: p, said: said } : null;
+}
+
+const API = { OPTS: OPTS, build: build, sig: sig, auto: auto, isDone: isDone, progress: progress, next: next, week: week, slots: slots, parse: parse, label: label, capEur: capEur, hours: hoursOf, blockMin: blockMin };
+if (typeof module !== 'undefined' && module.exports) module.exports = API;
+if (typeof LV !== 'undefined') LV.route = Object.assign(LV.route || {}, API);
+})();
+
+/* ============================================================
+   Perfil de la persona y bienvenida personalizada de Astro (onboarding)
+   · Astro pregunta: nombre, situación, objetivo, tiempo y presupuesto. Todo se guarda en el estado global (S.me) y solo en este navegador.
+   · La primera vez aparece justo después de la pantalla de inicio y antes de elegir modelo. Se puede saltar y se retoma desde el menú («Mi perfil y ruta»).
+   · Quien ya usaba la app no ve una pantalla a pantalla completa: recibe una invitación en el Centro de control.
+   · Con el perfil, el motor de ruta (roadmap.js) genera la hoja de ruta y Astro se dirige a la persona por su nombre.
+   · API: LV.me = { get, name, done, set, open, close, active, after, needsFirst, boot, splashDone, parts, line, patchSay }
+   ============================================================ */
+(function () {
+'use strict';
+const { $, $$, esc, ic } = LV;
+const S = LV.state;
+const RT = LV.route;
+const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+
+// ---------- perfil ----------
+const clean = (s, n) => String(s == null ? '' : s).replace(/[<>&"`\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim().slice(0, n);
+/** «ana maría» → «Ana María»; si la persona ya usó mayúsculas mixtas (p. ej. «DaniMar»), se respeta. */
+function nice(s) {
+  s = clean(s, 30); if (!s) return '';
+  if (s === s.toLowerCase() || s === s.toUpperCase()) return s.toLowerCase().replace(/(^|[\s\-'’])([a-záéíóúüñ])/g, (m, a, b) => a + b.toUpperCase());
+  return s;
+}
+const ME = () => S.me;
+const firstOf = (n) => String(n || '').split(' ')[0];
+const first = () => firstOf(ME().name);
+function set(patch, quiet) {
+  const m = ME(); patch = patch || {};
+  if ('name' in patch) m.name = nice(patch.name);
+  if ('occ' in patch) m.occ = RT.OPTS.occ.some((o) => o.id === patch.occ) ? patch.occ : '';
+  if ('res' in patch) { const ok = RT.OPTS.res.map((o) => o.id); let r = (patch.res || []).filter((x, i, a) => ok.indexOf(x) >= 0 && a.indexOf(x) === i); if (r.indexOf('nov') >= 0 && r.indexOf('exp') >= 0) r = r.filter((x) => x !== (m.res.indexOf('nov') >= 0 ? 'nov' : 'exp')); m.res = r; }
+  if ('goal' in patch) m.goal = RT.OPTS.goal.some((o) => o.id === patch.goal) ? patch.goal : '';
+  if ('goalTxt' in patch) m.goalTxt = clean(patch.goalTxt, 160);
+  if ('hours' in patch) m.hours = RT.OPTS.hours.some((o) => o.id === Number(patch.hours)) ? Number(patch.hours) : 0;
+  if ('when' in patch) m.when = (patch.when || []).filter((x, i, a) => RT.OPTS.when.some((o) => o.id === x) && a.indexOf(x) === i);
+  if ('cap' in patch) m.cap = RT.OPTS.cap.some((o) => o.id === patch.cap) ? patch.cap : '';
+  if ('done' in patch) m.done = !!patch.done;
+  if ('skip' in patch) m.skip = !!patch.skip;
+  m.v = 1; m.at = Date.now();
+  if (!quiet) LV.save();
+  if (LV.hub && S.view === 'hub') LV.hub.refresh();
+}
+/** Etiquetas legibles del perfil. */
+function parts() {
+  const m = ME(), L = RT.label;
+  return {
+    name: m.name, occ: L('occ', m.occ), res: (m.res || []).map((x) => L('res', x)).filter(Boolean), goal: L('goal', m.goal), goalTxt: m.goalTxt || '',
+    hours: m.hours ? L('hours', m.hours) + ' a la semana' : '', when: (m.when || []).map((x) => L('when', x).toLowerCase()), cap: m.cap ? L('cap', m.cap) : '',
+  };
+}
+/** Una línea con lo que Astro sabe de la persona (para mostrar o enviar al servidor). */
+function line() {
+  const p = parts(), a = [];
+  if (p.occ) a.push(p.occ.toLowerCase()); if (p.res.length) a.push(p.res.join(', ').toLowerCase()); if (p.goal) a.push('objetivo: ' + p.goal.toLowerCase());
+  if (p.hours) a.push(p.hours); if (p.cap) a.push('presupuesto: ' + p.cap.toLowerCase());
+  return a.join(' · ');
+}
+/** Cambia el perfil con lo que la persona dice en el chat y devuelve las frases de lo que se ha entendido (o null). */
+function patchSay(norm) {
+  const r = RT.parse(norm); if (!r) return null;
+  set(r.patch); if (!ME().done) set({ done: true }, true);
+  return r;
+}
+
+// ---------- arranque ----------
+function seenWelcome() { try { const r = JSON.parse(localStorage.getItem('lv_agent_v1') || '{}'); return !!(r && r.wel); } catch (e) { return false; } }
+/** Persona nueva de verdad: ni perfil, ni modelo, ni saludo previo de Astro. */
+function needsFirst() { const m = ME(); return !m.done && !m.skip && !seenWelcome() && !(S.mdl && S.mdl.id) && !LV.hasIdea(); }
+
+let root = null, step = 0, mode = 'first', d = null, ret = -1, busy = false, lastFocus = null, waiters = [];
+const STEPS = 5;
+const active = () => !!(root && !root.hidden);
+function after(cb) { if (active()) waiters.push(cb); else cb(); }
+function lockApp(on) { const app = $('#app'), bn = document.querySelector('.bn'); [app, bn].forEach((e) => { if (!e) return; if (on) e.setAttribute('inert', ''); else e.removeAttribute('inert'); }); }
+
+// ---------- pantalla ----------
+const MINI = '<svg class="pf-mini" viewBox="8 6 104 104" focusable="false" aria-hidden="true"><use href="#ax-mini" x="0" y="0" width="120" height="120"></use></svg>';
+function radio(kind, o, cur) {
+  const on = String(cur) === String(o.id);
+  return '<button type="button" class="pf-o" role="radio" aria-checked="' + on + '" data-act="pf-pick" data-k="' + kind + '" data-v="' + esc(o.id) + '"><b>' + esc(o.l) + '</b>' + (o.s ? '<small>' + esc(o.s) + '</small>' : '') + '</button>';
+}
+function check(kind, o, arr) {
+  const on = (arr || []).indexOf(o.id) >= 0;
+  return '<button type="button" class="pf-o" role="checkbox" aria-checked="' + on + '" data-act="pf-pick" data-k="' + kind + '" data-v="' + esc(o.id) + '" data-multi="1"><b>' + esc(o.l) + '</b></button>';
+}
+const group = (label, id, html, cls) => '<div class="pf-g"><p class="pf-gl" id="' + id + '">' + esc(label) + '</p><div class="pf-os' + (cls ? ' ' + cls : '') + '" role="' + (html.indexOf('role="checkbox"') >= 0 ? 'group' : 'radiogroup') + '" aria-labelledby="' + id + '">' + html + '</div></div>';
+function hi(t) { const n = d && firstOf(d.name); return n ? n + ', ' + t.replace(/^([¿¡]?)(\S)/, (m, a, b) => a + b.toLowerCase()) : t; }
+function stepHtml() {
+  const O = RT.OPTS;
+  if (step === 0) return { k: 'Antes de empezar', h: 'Hola, soy <span class="pf-hl">Astro</span>.<br>¿Cómo te llamo?',
+    p: 'Te hago 4 preguntas rápidas para adaptar la ruta a tu tiempo, tus recursos y tus objetivos. Lo que contestes se guarda solo en tu navegador.',
+    b: '<label class="pf-f"><span class="pf-gl">Tu nombre</span><input id="pf-name" type="text" maxlength="30" autocomplete="given-name" enterkeyhint="next" placeholder="Por ejemplo, Lucía" value="' + esc(d.name) + '"></label>' +
+       '<button type="button" class="pf-lk" data-act="pf-noname">Prefiero no decirlo</button>' };
+  if (step === 1) return { k: 'Paso 2 de 5 · Tu situación', h: hi('¿Cuál es tu situación ahora?'), p: 'Así sé cuánto tiempo real tienes y qué cuidar.',
+    b: group('Ahora mismo', 'pf-g-occ', O.occ.map((o) => radio('occ', o, d.occ)).join('')) + group('Qué más te describe (elige las que quieras)', 'pf-g-res', O.res.map((o) => check('res', o, d.res)).join(''), 'pf-chips') };
+  if (step === 2) return { k: 'Paso 3 de 5 · Tu objetivo', h: hi('¿Qué quieres conseguir?'), p: 'No hay respuesta mejor ni peor: cambia el ritmo y lo que priorizo.',
+    b: group('Mi objetivo principal', 'pf-g-goal', O.goal.map((o) => radio('goal', o, d.goal)).join('')) +
+       '<label class="pf-f"><span class="pf-gl">Con tus palabras (opcional)</span><input id="pf-goaltxt" type="text" maxlength="160" placeholder="Ej.: llegar a 800 € al mes antes de verano" value="' + esc(d.goalTxt) + '"></label>' };
+  if (step === 3) return { k: 'Paso 4 de 5 · Tiempo y recursos', h: hi('¿Con cuánto tiempo y dinero cuentas?'), p: 'Sin presupuesto también se puede validar: la ruta se adapta a lo que tengas.',
+    b: group('Horas por semana para tu proyecto', 'pf-g-h', O.hours.map((o) => radio('hours', o, d.hours)).join(''), 'pf-chips') +
+       group('Cuándo sueles poder (elige las que quieras)', 'pf-g-w', O.when.map((o) => check('when', o, d.when)).join(''), 'pf-chips') +
+       group('Presupuesto para probar tu idea', 'pf-g-c', O.cap.map((o) => radio('cap', o, d.cap)).join(''), 'pf-chips') };
+  const p = partsOf(d), row = (t, v, s) => '<div class="pf-r"><span><small>' + t + '</small><b>' + (v ? esc(v) : '<i>Sin responder</i>') + '</b></span><button type="button" class="pf-lk" data-act="pf-go" data-s="' + s + '">Cambiar</button></div>';
+  return { k: mode === 'edit' ? 'Tu perfil' : 'Paso 5 de 5 · Resumen', h: mode === 'edit' ? (p.name ? p.name + ', este es tu perfil' : 'Este es tu perfil') : (p.name ? 'Esto es lo que entendí, ' + p.name : 'Esto es lo que entendí'),
+    p: mode === 'edit' ? 'Si algo cambia, ajústalo y reajusto tu ruta al momento.' : 'Con esto preparo tu ruta paso a paso. Podrás cambiarlo cuando quieras desde el menú.',
+    b: (mode === 'edit' ? '' : '') + '<div class="pf-sum">' + row('Nombre', p.name, 0) + row('Situación', [p.occ].concat(p.res).filter(Boolean).join(' · '), 1) + row('Objetivo', [p.goal, p.goalTxt].filter(Boolean).join(' · '), 2) + row('Tiempo', [p.hours, p.when.length ? p.when.join(', ') : ''].filter(Boolean).join(' · '), 3) + row('Presupuesto', p.cap, 3) + '</div>' + (mode === 'edit' ? '<button type="button" class="pf-lk pf-del" data-act="pf-clear">Borrar mi perfil de este navegador</button>' : '') };
+}
+function partsOf(x) { const L = RT.label; return { name: x.name, occ: L('occ', x.occ), res: (x.res || []).map((v) => L('res', v)).filter(Boolean), goal: L('goal', x.goal), goalTxt: x.goalTxt || '', hours: x.hours ? L('hours', x.hours) + ' a la semana' : '', when: (x.when || []).map((v) => L('when', v).toLowerCase()), cap: x.cap ? L('cap', x.cap) : '' }; }
+function build() {
+  if (!root) root = $('#pf'); if (!root) return;
+  const s = stepHtml(), last = step === STEPS - 1, editing = mode === 'edit';
+  const dots = Array.from({ length: STEPS }, (_, i) => '<i class="' + (i === step ? 'on' : i < step ? 'ok' : '') + '"></i>').join('');
+  root.innerHTML =
+    '<header class="pf-top"><div class="pf-top-in"><span class="pf-br" aria-hidden="true">' + MINI + '<b class="pf-bn">Valid<span>Lance</span></b></span>' +
+      (editing ? '<button type="button" class="btn ghost sm" data-act="pf-close">Cerrar</button>' : '<button type="button" class="pf-lk" data-act="pf-skip" id="pf-skip">Saltar por ahora</button>') + '</div></header>' +
+    '<div class="pf-sc"><section class="pf-card" aria-labelledby="pf-t" aria-describedby="pf-d">' +
+      '<div class="pf-hd"><span class="pf-av" aria-hidden="true">' + MINI + '</span><div><p class="pf-k">' + esc(s.k) + '</p>' +
+      '<h1 id="pf-t" tabindex="-1">' + s.h + '</h1><p class="pf-p" id="pf-d">' + esc(s.p) + '</p></div></div>' +
+      '<div class="pf-b" aria-live="polite">' + s.b + '</div>' +
+      '<footer class="pf-ft"><div class="pf-dots" aria-hidden="true">' + dots + '</div><div class="pf-act">' +
+        (step > 0 && !(editing && step === STEPS - 1 && ret < 0) ? '<button type="button" class="btn ghost" data-act="pf-back">' + (ret >= 0 ? 'Cancelar' : 'Atrás') + '</button>' : '') +
+        '<button type="button" class="btn pri pf-next" id="pf-next" data-act="pf-next">' + (last ? (editing ? 'Guardar cambios' : 'Preparar mi ruta') : ret >= 0 ? 'Listo' : 'Continuar') + ic('right', 'sm') + '</button></div></footer>' +
+    '</section></div>';
+  const t = $('#pf-t', root);
+  setTimeout(() => { const inp = $('#pf-name', root); try { (step === 0 && inp ? inp : t).focus({ preventScroll: true }); } catch (e) { /* sin foco */ } }, 30);
+}
+function readInputs() {
+  const n = $('#pf-name', root); if (n) d.name = nice(n.value);
+  const g = $('#pf-goaltxt', root); if (g) d.goalTxt = clean(g.value, 160);
+}
+function commit(partial) { set({ name: d.name, occ: d.occ, res: d.res, goal: d.goal, goalTxt: d.goalTxt, hours: d.hours, when: d.when, cap: d.cap }); if (!partial) set({ done: true, skip: false }); }
+function open(m) {
+  root = $('#pf'); if (!root) return;
+  if (!root.hidden && !root.classList.contains('go')) return;
+  mode = m || (needsFirst() ? 'first' : 'edit');
+  const me = ME(); d = { name: me.name, occ: me.occ, res: (me.res || []).slice(), goal: me.goal, goalTxt: me.goalTxt || '', hours: me.hours, when: (me.when || []).slice(), cap: me.cap };
+  step = mode === 'edit' && me.done ? STEPS - 1 : 0; ret = -1; busy = false;
+  lastFocus = document.activeElement && document.activeElement !== document.body ? document.activeElement : null;
+  build(); root.classList.remove('go'); root.hidden = false; root.classList.remove('show'); void root.offsetWidth; root.classList.add('show');
+  lockApp(true); LV.applyTheme();
+  const sp = $('#splash'); if (sp && !sp.hidden) root.setAttribute('inert', ''); else root.removeAttribute('inert');
+  if (LV.agent && LV.agent.hidePresenter) { try { LV.agent.hidePresenter(); } catch (e) { /* sin asistente */ } }
+}
+function close(done) {
+  if (!root || root.hidden) return;
+  const gate = LV.model && LV.model.gateOpen && LV.model.gateOpen();
+  root.classList.add('go');
+  const fin = () => {
+    root.hidden = true; root.classList.remove('go', 'show'); root.innerHTML = ''; busy = false; LV.applyTheme(); if (LV.rt) LV.rt.paintMenu();
+    if (!gate) lockApp(false);
+    if (gate && LV.model && LV.model.splashDone) LV.model.splashDone(); // el foco pasa a la elección de modelo
+    else if (lastFocus && document.contains(lastFocus)) { try { lastFocus.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } }
+    const w = waiters; waiters = []; w.forEach((f) => { try { f(done); } catch (e) { /* no frena al resto */ } });
+  };
+  if (reduced()) fin(); else setTimeout(fin, 360);
+}
+function finish() {
+  if (busy) return; busy = true; readInputs(); commit(false);
+  if (LV.rt) LV.rt.ensure(true);
+  LV.toast(mode === 'edit' ? 'Perfil guardado' : (d.name ? 'Un placer, ' + firstOf(d.name) : 'Perfil guardado'), 'check');
+  if (LV.agent && LV.agent.onboarded) { try { LV.agent.onboarded(mode); } catch (e) { /* sin asistente */ } }
+  close(true);
+}
+LV.ACT['pf-pick'] = function (el) {
+  const k = el.dataset.k, v = el.dataset.v; readInputs();
+  if (el.dataset.multi) { const a = d[k] || (d[k] = []), i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); if (k === 'res') { if (v === 'nov') d.res = d.res.filter((x) => x !== 'exp'); if (v === 'exp') d.res = d.res.filter((x) => x !== 'nov'); } }
+  else d[k] = k === 'hours' ? Number(v) : (d[k] === v ? '' : v);
+  const y = $('.pf-sc', root).scrollTop; build(); $('.pf-sc', root).scrollTop = y;
+  const b = $('[data-k="' + k + '"][data-v="' + v + '"]', root); if (b) { try { b.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } }
+};
+LV.ACT['pf-next'] = function () {
+  readInputs();
+  if (step === 0 && !d.name) { const n = $('#pf-name', root); if (n) { n.setAttribute('aria-invalid', 'true'); n.focus(); } LV.toast('Dime cómo te llamo o pulsa «Prefiero no decirlo»', 'info'); return; }
+  if (ret >= 0) { const to = ret; ret = -1; commit(true); step = to; build(); return; }
+  if (step >= STEPS - 1) { finish(); return; }
+  commit(true); step++; build();
+};
+LV.ACT['pf-back'] = function () { readInputs(); if (ret >= 0) { step = ret; ret = -1; build(); return; } if (step > 0) { step--; build(); } };
+LV.ACT['pf-go'] = function (el) { readInputs(); ret = step; step = Number(el.dataset.s) || 0; build(); };
+LV.ACT['pf-noname'] = function () { d.name = ''; set({ name: '' }); step = 1; build(); };
+LV.ACT['pf-skip'] = function () { readInputs(); commit(true); set({ skip: true }); if (LV.agent && LV.agent.onboarded) { try { LV.agent.onboarded('skip'); } catch (e) { /* sin asistente */ } } close(false); };
+LV.ACT['pf-close'] = function () { close(false); };
+LV.ACT['pf-clear'] = function () {
+  const b = $('.pf-del', root); if (b && !b.dataset.sure) { b.dataset.sure = '1'; b.textContent = 'Pulsa otra vez para borrar tu perfil y tu ruta'; b.classList.add('warn'); return; }
+  LV.me.clear(); if (LV.rt) LV.rt.reset(); LV.toast('Perfil borrado', 'refresh'); close(false);
+};
+LV.ACT['pf-edit'] = function () { const m = $('#menu-user'); if (m && !m.hidden) { m.hidden = true; const b = $('#btn-user'); if (b) b.setAttribute('aria-expanded', 'false'); } open(ME().done ? 'edit' : 'first'); };
+document.addEventListener('keydown', (e) => {
+  if (!root || root.hidden) return;
+  if (e.key === 'Escape' && mode === 'edit') { e.preventDefault(); close(false); return; }
+  if (e.key === 'Enter' && e.target && (e.target.id === 'pf-name' || e.target.id === 'pf-goaltxt')) { e.preventDefault(); LV.ACT['pf-next'](); return; }
+  if (e.key === 'Tab') {
+    const f = $$('button:not([disabled]),input,[tabindex="0"]', root).filter((x) => !x.hidden && x.offsetParent !== null);
+    if (!f.length) return; const a = f[0], z = f[f.length - 1];
+    if (e.shiftKey && (document.activeElement === a || document.activeElement === $('#pf-t', root))) { e.preventDefault(); z.focus(); } else if (!e.shiftKey && document.activeElement === z) { e.preventDefault(); a.focus(); }
+  }
+});
+document.addEventListener('input', (e) => { if (e.target && e.target.id === 'pf-name') e.target.removeAttribute('aria-invalid'); });
+
+LV.me = {
+  get: () => S.me, name: () => ME().name || '', first: () => first(ME().name), done: () => !!ME().done, set: set, parts: parts, line: line, patchSay: patchSay,
+  open: function (m) { open(m); }, close: function () { close(false); }, active: active, after: after, needsFirst: needsFirst,
+  /** Al arrancar: si es una persona nueva, la pantalla queda lista debajo de la pantalla de inicio. */
+  boot: function () { if (needsFirst()) open('first'); },
+  /** La pantalla de inicio ha terminado: el foco pasa al onboarding. */
+  splashDone: function () { if (root && !root.hidden) { root.removeAttribute('inert'); build(); } },
+  /** La persona vuelve a su perfil desde cero (p. ej. «Borrar todo»): se vuelve a ofrecer. */
+  clear: function () { Object.assign(S.me, { name: '', occ: '', res: [], goal: '', goalTxt: '', hours: 0, when: [], cap: '', done: false, skip: false }); LV.save(); },
+};
+})();
+
+/* ============================================================
+   «Tu ruta»: la hoja de ruta personal de Astro dentro de la app
+   · Une el perfil de la persona (S.me), el estado real del proyecto (modelo, idea, informe, landing, validación…) y el motor roadmap.js.
+   · La ruta se recalcula sola cuando cambia algo que la condiciona (tiempo, capital, situación, modelo, idea) y conserva los pasos ya hechos.
+   · Los pasos que la app puede comprobar (idea escrita, informe, precio, landing, validación) se marcan solos; el resto, a mano o contándoselo a Astro.
+   · Dibuja la tarjeta del Centro de control y ofrece la API que usa Astro (LV.rt.info, mark, ensure, adjust…).
+   · API: LV.rt = { ctx, get, info, ensure, reset, mark, toggle, cardHtml, paint, hubStep, MODN }
+   ============================================================ */
+(function () {
+'use strict';
+const { $, $$, esc, ic } = LV;
+const S = LV.state;
+const RT = LV.route;
+const MODN = { compite: 'Compite', valida: 'Valida', genera: 'Genera', lanza: 'Lanza', panel: 'el Panel' };
+const HUBID = { compete: 'eco', income: 'est', price: 'est', land: 'gen', survey: 'val', traffic: 'val', measure: 'val', presell: 'val', talk: 'val', decide: 'pan', legal: 'lan', idea: 'eco' };
+const bold = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+const lcf = (s) => { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); };
+const reduced = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch (e) { return false; } };
+
+function famNow() {
+  try { const k = LV.model && LV.model.key && LV.model.key(); if (!k) return ''; if (k === 'otro') return (LV.model.engine && LV.model.engine()) || ''; return k; } catch (e) { return ''; }
+}
+/** Lo que la app ya sabe del proyecto y que condiciona la ruta. */
+function ctx() {
+  let P = { valida: 0, lanza: 0 }; try { P = LV.progress() || P; } catch (e) { /* sin progreso */ }
+  let idea = false; try { idea = LV.hasIdea() || !!(LV.agent && LV.agent.ideaText && LV.agent.ideaText()) || !!(S.compite && S.compite.brief && String(S.compite.brief.text || '').trim().length > 12); } catch (e) { /* sin idea */ }
+  return {
+    fam: famNow(), idea: idea, ran: !!(S.compite && S.compite.ran), est: !!(S.est && S.est.touched),
+    landPub: !!(S.genera && S.genera.pub), landVisited: !!(S.genera && (S.genera.visited || S.genera.tweaked)),
+    progress: { valida: P.valida || 0, lanza: P.lanza || 0 },
+  };
+}
+let cache = null;
+const RS = () => (S.route && typeof S.route === 'object' ? S.route : (S.route = { done: {}, sig: '', at: 0, open: false }));
+/** Ruta actual (null si la persona aún no ha contado su situación). */
+function get() {
+  const me = S.me; if (!me || !me.done) return null;
+  const cx = ctx(), sg = RT.sig(me, cx);
+  if (!cache || cache.sig !== sg) { cache = { sig: sg, R: RT.build(me, cx) }; const r = RS(); if (!r.at) r.at = Date.now(); r.sig = sg; }
+  const r = RS(), au = RT.auto(cx);
+  return { R: cache.R, au: au, done: r.done || {}, cx: cx, me: me };
+}
+/** Todo lo que necesita Astro o la tarjeta en un solo objeto. */
+function info() {
+  const g = get(); if (!g) return null;
+  const pr = RT.progress(g.R, g.done, g.au), wk = RT.week(g.R, g.done, g.au), nx = RT.next(g.R, g.done, g.au, 3);
+  const pend = g.R.steps.filter((s) => !RT.isDone(s.id, g.done, g.au));
+  const wn = wk.n || (pend[0] && pend[0].w) || 1, rows = g.R.steps.filter((s) => s.w <= wn && s.we >= wn);
+  return { R: g.R, au: g.au, done: g.done, cx: g.cx, me: g.me, prog: pr, week: wk, rows: rows, next: nx, pend: pend, finished: !pend.length, slots: RT.slots(g.me, g.R), weeksLeft: pend.length ? Math.max(1, g.R.nWeeks - (pend[0].w || 1) + 1) : 0 };
+}
+function ensure(force) { cache = force ? null : cache; const g = get(); paint(); return g; }
+function reset() { cache = null; S.route = { done: {}, sig: '', at: 0, open: false }; LV.save(); paint(); }
+function stepById(id) { const g = get(); return g ? g.R.steps.find((s) => s.id === id) || null : null; }
+/** Marca (o desmarca) un paso a mano. Devuelve el paso, o null si no existe. */
+function mark(id, on) {
+  const g = get(), s = g && g.R.steps.find((x) => x.id === id); if (!s) return null;
+  const r = RS(); if (!r.done) r.done = {};
+  if (on === false) delete r.done[id]; else r.done[id] = Date.now();
+  LV.save(); paint(); return s;
+}
+function toggle(id) {
+  const g = get(); if (!g) return null; const was = RT.isDone(id, g.done, {});
+  const s = mark(id, !was); if (!s) return null;
+  const i = info();
+  if (!was) { LV.toast(i && i.finished ? 'Ruta completa. Ahora decide con tus datos' : 'Paso hecho' + (i && i.next[0] ? '. Siguiente: ' + shorten(i.next[0].t, 44) : ''), 'check'); try { if (LV.agent && LV.agent.refreshCtx) LV.agent.refreshCtx(); } catch (e) { /* sin asistente */ } }
+  return s;
+}
+function shorten(t, n) { t = String(t || '').replace(/\s+/g, ' ').trim(); return t.length > n ? t.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : t; }
+
+/** Paso de la ruta que el Centro de control debería sugerir: el primero pendiente que tiene un módulo propio en la app. */
+function hubStep() {
+  const i = info(); if (!i || i.finished) return null;
+  const cand = (i.week.steps || []).filter((x) => !RT.isDone(x.id, i.done, i.au)).concat(i.pend);
+  const s = cand.find((x) => HUBID[x.id]); if (!s) return null;
+  return { hub: HUBID[s.id], step: s, mod: s.mod };
+}
+
+// ---------- dibujo ----------
+const hrs = (h) => (Math.round(h * 2) / 2).toString().replace('.', ',') + ' h';
+function stepRow(s, i, big) {
+  const dn = RT.isDone(s.id, i.done, i.au), auto = !!(i.au[s.id] && !i.done[s.id]);
+  const nm = MODN[s.mod];
+  return '<li class="rt-s' + (dn ? ' is-done' : '') + '">' +
+    '<button type="button" class="rt-ck" role="checkbox" aria-checked="' + dn + '" data-act="rt-tog" data-id="' + s.id + '"' + (auto ? ' disabled' : '') + ' aria-label="' + esc((dn ? 'Hecho: ' : 'Marcar como hecho: ') + s.t) + '">' + (dn ? ic('check', 'sm') : '') + '</button>' +
+    '<div class="rt-sb"><p class="rt-st">' + esc(s.t) + '</p>' +
+    '<p class="rt-sm"><span>' + hrs(s.h) + (s.min > 1 ? ' · ' + s.min + ' semanas de espera' : s.min === 1 && s.h < 2 ? '' : '') + '</span>' + (auto ? '<span class="rt-auto">Marcado solo</span>' : '') + (big ? '<span>Semana ' + s.w + (s.we > s.w ? '–' + s.we : '') + '</span>' : '') + '</p>' +
+    (big && s.why ? '<p class="rt-sw">' + esc(s.why) + '</p>' : '') + '</div>' +
+    (nm && !dn ? '<button type="button" class="btn ghost sm rt-go" data-act="rt-open" data-to="' + s.mod + '">' + esc(nm === 'el Panel' ? 'Panel' : nm) + ic('right', 'sm') + '</button>' : '') + '</li>';
+}
+function fullHtml(i) {
+  return '<div class="rt-ph">' + i.R.phases.map((p) => {
+    const dn = p.steps.filter((s) => RT.isDone(s.id, i.done, i.au)).length;
+    return '<section class="rt-p"><header><b>Fase ' + p.id + ' · ' + esc(p.t) + '</b><span>' + (p.steps.length ? 'Semanas ' + p.w0 + (p.w1 > p.w0 ? '–' + p.w1 : '') + ' · ' + dn + ' de ' + p.steps.length : '') + '</span></header>' +
+      '<p class="rt-pg">' + esc(p.goal) + '</p><ul class="rt-steps">' + p.steps.map((s, k) => stepRow(s, i, true)).join('') + '</ul></section>';
+  }).join('') + '</div>';
+}
+function cardHtml() {
+  const me = S.me || {}, i = info();
+  if (!i) {
+    const skipped = !!me.skip;
+    return '<section class="rt rt-inv" id="rt" aria-labelledby="rt-t"><div class="rt-hd"><span class="rt-ic">' + ic('route') + '</span><div class="rt-ht"><small>Hoja de ruta de Astro</small>' +
+      '<h3 id="rt-t">' + (me.name ? esc(me.name.split(' ')[0]) + ', ¿preparamos tu ruta?' : 'Una ruta a tu medida') + '</h3>' +
+      '<p>' + (skipped ? 'Antes te saltaste esta parte. Con 5 preguntas rápidas (situación, objetivo, tiempo y presupuesto) Astro te prepara un plan paso a paso que cabe en tu semana.' : 'Cuéntale a Astro tu situación, tu objetivo y cuánto tiempo tienes. En un minuto te prepara un plan paso a paso que cabe en tu semana.') + '</p></div></div>' +
+      '<div class="rt-act"><button type="button" class="btn pri" data-act="pf-edit">' + ic('route', 'sm') + 'Preparar mi ruta' + ic('right', 'sm') + '</button></div></section>';
+  }
+  const nm = (me.name || '').split(' ')[0], R = i.R, pct = i.prog.pct;
+  const goal = RT.label('goal', me.goal);
+  const sub = hrs(R.hours) + ' a la semana · unas ' + R.nWeeks + ' semanas hasta tus primeros clientes' + (goal ? ' · ' + lcf(goal) : '');
+  const wk = i.week, open = !!RS().open;
+  let now;
+  if (i.finished) now = '<div class="rt-now"><p class="rt-k">Ruta completada</p><p class="rt-done">Has recorrido todos los pasos. Revisa el Go / No-Go del Panel y decide con tus datos: seguir, ajustar o parar.</p></div>';
+  else {
+    const rows = i.rows.length ? i.rows : i.next.slice(0, 2);
+    now = '<div class="rt-now"><p class="rt-k">Esta semana · semana ' + (wk.n || 1) + ' de ' + R.nWeeks + ' · ≈ ' + hrs(wk.h || R.usable) + '</p><ul class="rt-steps">' + rows.map((s) => stepRow(s, i, false)).join('') + '</ul>' +
+      '<p class="rt-sl">' + ic('clock', 'sm') + '<span>Reserva <b>' + R.nBlocks + (R.nBlocks === 1 ? ' bloque' : ' bloques') + ' de ' + R.block + ' min</b>: ' + esc(i.slots.join(' · ')) + '</span></p></div>';
+  }
+  const notes = (R.notes || []).slice(0, 2).map((n) => '<li>' + bold(n) + '</li>').join('');
+  return '<section class="rt" id="rt" aria-labelledby="rt-t">' +
+    '<header class="rt-hd"><span class="rt-ic">' + ic('route') + '</span><div class="rt-ht"><small>Hoja de ruta de Astro</small><h3 id="rt-t">' + (nm ? esc(nm) + ', esta es tu ruta' : 'Esta es tu ruta') + '</h3><p>' + esc(sub) + '</p></div>' +
+    '<div class="rt-pr" role="img" aria-label="Avance de tu ruta: ' + pct + ' %"><b>' + pct + ' %</b><span class="rt-bar"><i style="width:' + Math.max(pct, 2) + '%"></i></span><small>' + i.prog.n + ' de ' + i.prog.total + ' pasos</small></div></header>' +
+    now + (notes ? '<ul class="rt-notes">' + notes + '</ul>' : '') +
+    '<div class="rt-act"><button type="button" class="btn ghost" data-act="rt-full" aria-expanded="' + open + '" aria-controls="rt-full">' + (open ? 'Ocultar la ruta completa' : 'Ver la ruta completa') + ic('chev', 'sm') + '</button>' +
+    '<button type="button" class="btn ghost" data-act="rt-ask">Hablar de mi ruta con Astro</button>' +
+    '<button type="button" class="btn ghost" data-act="pf-edit">Cambiar mi perfil</button></div>' +
+    '<div class="rt-full" id="rt-full"' + (open ? '' : ' hidden') + '>' + (open ? fullHtml(i) : '') + '</div></section>';
+}
+/** Redibuja solo la tarjeta (sin mover el foco de quien navega con teclado). */
+let pT = 0;
+function paint(now) {
+  clearTimeout(pT);
+  const go = () => {
+    const el = $('#rt'); if (!el || S.view !== 'hub') { paintMenu(); return; }
+    const act = document.activeElement;
+    const keep = act && el.contains(act) && act.dataset ? (act.dataset.act || '') + '|' + (act.dataset.id || '') : '';
+    const mn = $('#main'), y = mn ? mn.scrollTop : 0;
+    el.outerHTML = cardHtml();
+    if (keep) { // el foco vuelve al mismo control; si ese paso ya no está a la vista, pasa al título de la tarjeta
+      const [a, id] = keep.split('|'); let b = $('#rt [data-act="' + a + '"]' + (id ? '[data-id="' + id + '"]' : '')); if (!b || b.disabled) { b = $('#rt-t'); if (b) b.setAttribute('tabindex', '-1'); }
+      if (b) { try { b.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } }
+    }
+    if (mn && Math.abs(mn.scrollTop - y) > 2) mn.scrollTop = y;
+    paintMenu();
+  };
+  if (now) go(); else pT = setTimeout(go, 60);
+}
+function paintMenu() {
+  const t = $('#menu-me-t'), s = $('#menu-me-s'); const me = S.me || {};
+  if (t) t.textContent = me.done ? 'Mi perfil y ruta' : 'Contarle a Astro mi situación';
+  if (s) s.textContent = me.done && me.name ? me.name.split(' ')[0] : '';
+}
+
+LV.ACT['rt-tog'] = function (el) { toggle(el.dataset.id); };
+LV.ACT['rt-full'] = function () { const r = RS(); r.open = !r.open; LV.save(); paint(true); const b = $('#rt [data-act="rt-full"]'); if (b) { try { b.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } } };
+LV.ACT['rt-open'] = function (el) { const to = el.dataset.to; if (to && LV.hub && LV.hub.open) LV.hub.open(to); else if (to) LV.go(to); };
+LV.ACT['rt-ask'] = function () { const i = info(); try { if (LV.agent && LV.agent.talk) LV.agent.talk(i && !i.finished ? '¿Qué toca esta semana?' : 'Mi ruta'); } catch (e) { /* sin asistente */ } };
+LV.hooks.change.push(function () { if (S.view === 'hub') paint(); });
+LV.hooks.view.push(function () { paintMenu(); });
+
+LV.rt = { ctx: ctx, get: get, info: info, ensure: ensure, reset: reset, mark: mark, toggle: toggle, step: stepById, cardHtml: cardHtml, paint: paint, paintMenu: paintMenu, hubStep: hubStep, MODN: MODN, shorten: shorten, hrs: hrs, bold: bold };
 })();
 
 /* ============================================================
@@ -9206,6 +11071,199 @@ if (typeof LV !== 'undefined') LV.nlu = API;
 })();
 
 /* ============================================================
+   Memoria de conversación de Astro (sin DOM, sin red, determinista)
+   · Va aprendiendo de lo que la persona ESCRIBE en el chat: temas de negocio, cifras («cobro 29 € al mes», «tengo 200 €»,
+     «5 horas a la semana»), decisiones («voy a empezar con servicios») y si ya hizo el último paso que Astro le propuso.
+   · De lo que Astro RESPONDE solo guarda la primera línea (la conclusión) de las 3 últimas respuestas y el «Siguiente paso».
+   · Es un RESUMEN, nunca la conversación entera: unos 700 caracteres como máximo. Vive en el navegador (junto al chat).
+     Solo viaja al servidor de IA si la persona lo aceptó (LV.rag.memoryOk) y el servidor lo trata como DATOS, no instrucciones.
+   · Se borra con «olvida lo que te he dicho», con «Nuevo chat» y con «Empezar de cero».
+   API: LV.mem.{TOPICS, empty, clean, learn, answered, pack, describe, forget, topicOf, strategic, fold}
+   ============================================================ */
+(function () {
+'use strict';
+
+/** Temas de negocio. Deben coincidir con backend/app/strategy.py (las mismas pistas, sobre texto sin tildes). */
+const TOPICS = {
+  precio: 'estrategia de precio', competencia: 'competencia y posicionamiento', validacion: 'validación de la demanda', finanzas: 'números del negocio',
+  captacion: 'captar clientes', producto: 'qué construir primero', decision: 'decidir si seguir, pivotar o parar', tramites: 'trámites y forma legal', planificacion: 'tiempo y prioridades',
+};
+const RE = {
+  precio: /\b(precios?|cobr\w+|tarifas?|suscripci\w+|plan(?:es)? (?:anual|mensual|basico|pro)|descuentos?|cuanto (?:cobro|cobrar|vale|valdria)|subir(?:lo)? el precio|bajar(?:lo)? el precio|pricing|freemium|prueba gratis)\b/g,
+  competencia: /\b(competenc\w+|competidor\w*|rival\w*|diferenci\w+|posicionamiento|alternativas?|me copi\w+|copiar\w*|lider(?:es)?|ya existe|hay otros|otros que hacen|nicho)\b/g,
+  validacion: /\b((?!validlance)valid\w+|demanda|encuestas?|entrevistas?|preventa|lista de espera|waitlist|alguien (?:pagaria|compraria)|interes\w*|prueba de concepto|landing de validacion|me compran|querran)\b/g,
+  finanzas: /\b(costes?|costos?|gastos?|beneficios?|margen(?:es)?|punto de equilibrio|rentab\w+|ltv|cac|presupuesto|capital|inversion inicial|ingresos?|facturaci\w+|cuantos clientes|runway|caja|viable economicamente|unit economics|break ?even|ahorros?)\b/g,
+  captacion: /\b(captar|captaci\w+|primeros clientes|conseguir clientes|marketing|anuncios?|publicidad|ads|redes sociales|instagram|tiktok|linkedin|seo|canal(?:es)?|ventas?|vender|conversi\w+|embudo|boca a boca|influencers?|email|newsletter)\b/g,
+  producto: /\b(mvp|producto minimo|que construyo|que desarrollo|funcionalidades|features?|prototipo|no ?code|primera version|desarrollar|programar)\b/g,
+  decision: /\b(dejar (?:mi|el) (?:trabajo|empleo)|renunciar|merece la pena|seguir o parar|go ?\/? ?no ?go|pivotar|abandonar|me lanzo|arriesg\w+|invertir mis ahorros|vale la pena|me conviene|deberia (?:seguir|dejar|lanzar)|tirar la toalla)\b/g,
+  tramites: /\b(tramites?|autonomo|sociedad|\bsl\b|alta (?:en|como)|hacienda|impuestos?|iva|irpf|rgpd|licencia|factur\w+|cuota|seguridad social|marca registrada|contrato)\b/g,
+  planificacion: /\b(no llego|me falta tiempo|poco tiempo|horas (?:a la|por) semana|priorizar|prioridad(?:es)?|planificar|organizar|agobi\w+|atascad\w+|bloquead\w+|por donde empiezo|que hago primero)\b/g,
+};
+const ORDER = Object.keys(TOPICS);
+const MAX_FACTS = 8, MAX_ADV = 3, MAX_DEC = 2, MAX_TOPICS = 6;
+
+/** Minúsculas y sin tildes (conserva comas y puntos: los necesita para leer «1.500» y «1,5»). */
+const fold = (s) => String(s == null ? '' : s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+const clip = (s, n) => { s = String(s == null ? '' : s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1).replace(/\s+\S*$/, '') + '…' : s; };
+const plain = (s) => String(s || '').replace(/\[([^\]]*)\]\([^)]*\)/g, '$1').replace(/[*_`#>]/g, '').replace(/\s+/g, ' ').trim();
+
+/** Temas de un texto ya pasado por fold(), de más a menos pistas (desempata el orden de ORDER). */
+function topicOf(f) {
+  const hits = ORDER.map((k, i) => { const m = f.match(RE[k]); return { k: k, n: m ? m.length * (k === 'decision' ? 0.5 : 1) : 0, i: i }; }).filter((x) => x.n > 0);   // «decision» pesa la mitad: «merece la pena» acompaña a casi cualquier pregunta
+  hits.sort((a, b) => b.n - a.n || a.i - b.i);
+  return hits.map((x) => x.k).slice(0, 2);
+}
+
+/** ¿Pregunta de estrategia (compara, decide, recomienda) sobre un tema de negocio? Mismo criterio que backend/app/strategy.py › es_estrategica. */
+const DEEP = { precio: 1, competencia: 1, finanzas: 1, decision: 1, validacion: 1 };
+const RE_STRAT = /\b(estrategi\w+|diagnostic\w+|que har\w+|que me recomiendas|conviene|deberia|merece|plan de accion|por que|compar\w+|alternativas?|pros y contras|mejor opcion)\b/;
+function strategic(raw) {
+  const f = fold(raw), words = f.split(/\s+/).filter(Boolean).length, tp = topicOf(f);
+  if (!tp.length || words <= 3) return false;
+  return RE_STRAT.test(f) || (words >= 9 && tp.some((x) => DEEP[x]));
+}
+
+// ---------- estado ----------
+function empty() { return { v: 1, n: 0, topics: [], facts: {}, dec: [], adv: [], step: '', done: '' }; }
+/** Valida lo que se carga de localStorage: forma, tipos y tamaños. Cualquier cosa rara se descarta. */
+function clean(m) {
+  const o = empty();
+  if (!m || typeof m !== 'object') return o;
+  o.n = Math.max(0, Math.min(500, Number(m.n) | 0));
+  o.topics = (Array.isArray(m.topics) ? m.topics : []).filter((t) => TOPICS[t]).filter((t, i, a) => a.indexOf(t) === i).slice(-MAX_TOPICS);
+  if (m.facts && typeof m.facts === 'object') {
+    Object.keys(m.facts).slice(0, 20).forEach((k) => {
+      const x = m.facts[k]; const key = clip(k, 40);
+      if (key && x && typeof x.v === 'string' && x.v.trim()) o.facts[key] = { v: clip(x.v, 80), n: Math.max(0, Math.min(500, Number(x.n) | 0)) };
+    });
+    trim(o);
+  }
+  o.dec = (Array.isArray(m.dec) ? m.dec : []).filter((x) => typeof x === 'string' && x.trim()).map((x) => clip(x, 90)).slice(-MAX_DEC);
+  o.adv = (Array.isArray(m.adv) ? m.adv : []).filter((x) => x && typeof x.c === 'string' && x.c.trim()).map((x) => ({ t: TOPICS[x.t] ? x.t : '', c: clip(x.c, 130) })).slice(-MAX_ADV);
+  o.step = typeof m.step === 'string' ? clip(m.step, 200) : ''; o.done = typeof m.done === 'string' ? clip(m.done, 200) : '';
+  return o;
+}
+function trim(M) {
+  const ks = Object.keys(M.facts);
+  if (ks.length > MAX_FACTS) ks.sort((a, b) => M.facts[a].n - M.facts[b].n).slice(0, ks.length - MAX_FACTS).forEach((k) => { delete M.facts[k]; });
+}
+function pushTopic(M, t) { if (!TOPICS[t]) return; M.topics = M.topics.filter((x) => x !== t); M.topics.push(t); M.topics = M.topics.slice(-MAX_TOPICS); }
+
+// ---------- cifras que la persona dice en el chat ----------
+const NUM = /(\d{1,3}(?:\.\d{3})+|\d+(?:,\d+)?|\d+\.\d+)\s*(k\b|mil\b)?\s*(€|euros?\b|eur\b|%|por ?ciento|horas?\b|h\b|clientes?\b|usuarios?\b|suscriptores\b|alumnos\b|pedidos\b|ventas\b)?((?:\s+(?:al|por|a la|cada)\s+(?:mes|ano|semana|dia|cliente|pedido))?)/g;
+/** Qué es una cifra según su unidad y las palabras de al lado. '' = no se sabe: no se guarda (mejor menos memoria que memoria equivocada). */
+function labelOf(unit, suffix, before, after) {
+  const u = unit || '', c = before + ' ' + after;
+  if (/%|ciento/.test(u)) return /margen/.test(c) ? 'margen' : /convers|convert|tasa/.test(c) ? 'conversion' : /descuent/.test(c) ? 'descuento' : '';
+  if (/^(horas?|h)$/.test(u)) return /semana/.test(suffix + ' ' + after) || /semana/.test(before) ? 'horas a la semana' : /dia/.test(suffix + ' ' + after) ? 'horas al dia' : '';
+  if (/^(clientes?|usuarios?|suscriptores|alumnos|pedidos|ventas)$/.test(u)) return /necesit|objetivo|quiero|llegar|conseguir|meta|aspiro|apunto/.test(before) ? 'clientes objetivo' : /tengo|llevo|ya |actualmente|ahora/.test(before) ? 'clientes actuales' : '';
+  if (/€|eur/.test(u) || (!u && suffix)) {
+    if (/cobr|precio|tarifa|suscrip|plan |mensualidad|cuota|cuesta mi|vale mi|vendo a|vender a/.test(before)) return 'precio';
+    if (/coste|costes|gasto|gastos|me sale|me cuesta|producir|fabricar|envio|proveedor/.test(before)) return 'coste';
+    if (/presupuest|ahorr|capital|dispong|tengo|puedo invertir|invertir|invertiria|inversion/.test(before)) return 'presupuesto';
+    if (/ingres|factur|gano|ganar|beneficio|objetivo|meta/.test(before)) return 'ingresos objetivo';
+    if (/^\s*(de |para |en )?(presupuesto|ahorros?|capital|inversion)/.test(after)) return 'presupuesto';   // «200 euros de presupuesto»
+    if (/^\s*(de |por |al mes de )?(precio|cuota|mensualidad|tarifa)/.test(after)) return 'precio';
+    if (/^\s*(de |en )?(costes?|gastos?)/.test(after)) return 'coste';
+  }
+  return '';
+}
+function numOf(txt, unit) {
+  let v = /^\d{1,3}(?:\.\d{3})+$/.test(txt) ? parseFloat(txt.replace(/\./g, '')) : parseFloat(txt.replace(',', '.'));
+  if (unit === 'k' || unit === 'mil') v *= 1000;
+  return v;
+}
+function factsFrom(f) {
+  const out = []; let m, prevEnd = 0; NUM.lastIndex = 0;
+  while ((m = NUM.exec(f))) {
+    const from = prevEnd; prevEnd = NUM.lastIndex;                           // las palabras de una cifra no pueden ser las de la cifra anterior («cobro 29 € al mes. Tengo 200 €»)
+    const unit = m[3] || '', suffix = (m[4] || '').trim();
+    if (!unit && !suffix) continue;                                         // un número suelto («2027», «3») no es una cifra de negocio
+    const v = numOf(m[1], m[2]); if (!isFinite(v) || v <= 0) continue;
+    let before = f.slice(Math.max(from, m.index - 34), m.index); const after = f.slice(NUM.lastIndex, NUM.lastIndex + 18);
+    const brk = Math.max(before.lastIndexOf('. '), before.lastIndexOf('; '), before.lastIndexOf('! '), before.lastIndexOf('? '), before.lastIndexOf(': '));
+    if (brk >= 0) before = before.slice(brk + 2);                            // solo cuenta la frase de la cifra
+    const k = labelOf(unit, suffix, before, after); if (!k) continue;
+    out.push({ k: k, v: clip(m[0].replace(/\s+/g, ' ').trim(), 40) });
+  }
+  return out;
+}
+const DECIDE = /\b(?:he decidido|decid[ií]|prefiero|elijo|me quedo con|opto por|empezar[eé]|empiezo con|(?:voy|vamos) a (?:empezar|cobrar|vender|lanzar|dejar|montar|crear|abrir|ofrecer|centrar\w*|apostar|usar|hacer|trabajar|probar|subir|bajar)\b)[^.!?\n]{4,90}/i;
+const DONE = /\b(ya lo (?:hice|he hecho|termine|acabe)|lo hice|lo he hecho|hecho|completado|terminado|ya esta|ya lo tengo)\b/;
+
+/** Aprende de lo que la persona acaba de escribir. Devuelve la misma memoria (modificada). */
+function learn(M, raw) {
+  raw = String(raw == null ? '' : raw).slice(0, 600);
+  if (!M || !raw.trim()) return M;
+  const f = fold(raw), q = /\?\s*$|^\s*¿/.test(raw);
+  M.n = Math.min(500, (M.n || 0) + 1);
+  topicOf(f).reverse().forEach((t) => pushTopic(M, t));                      // el tema principal queda el último = el más reciente
+  factsFrom(f).forEach((x) => { M.facts[x.k] = { v: x.v, n: M.n }; });
+  trim(M);
+  if (!q) {
+    const d = raw.match(DECIDE);
+    if (d) { const t = clip(d[0].replace(/\s+/g, ' ').trim(), 90); M.dec = M.dec.filter((x) => x !== t); M.dec.push(t); M.dec = M.dec.slice(-MAX_DEC); }
+  }
+  if (M.step && f.split(' ').length <= 8 && DONE.test(f)) { M.done = M.step; M.step = ''; }   // «ya lo hice»: el paso pendiente pasa a hecho
+  return M;
+}
+
+// ---------- lo que Astro responde ----------
+function firstLine(t) {
+  const L = String(t || '').split('\n').map((l) => plain(l)).filter((l) => l && !/^siguiente paso/i.test(l));
+  const l = L.find((x) => x.length >= 25);
+  return l ? clip(l, 130) : '';
+}
+function stepOf(t) {
+  const m = String(t || '').match(/siguiente paso:?\**\s*([^\n]+)/i);
+  return m ? clip(plain(m[1]), 200) : '';
+}
+/** Registra una respuesta de Astro. o = { q: pregunta, topic: tema que devolvió el servidor }. */
+function answered(M, text, o) {
+  if (!M) return M;
+  o = o || {};
+  const topic = o.topic && TOPICS[o.topic] ? o.topic : (topicOf(fold(o.q || ''))[0] || '');
+  if (topic) pushTopic(M, topic);
+  const c = firstLine(text);
+  if (c) { M.adv.push({ t: topic, c: c }); M.adv = M.adv.slice(-MAX_ADV); }
+  const s = stepOf(text);
+  if (s) { M.step = s; M.done = ''; }
+  return M;
+}
+
+// ---------- hacia el servidor y hacia la persona ----------
+/** Resumen compacto para el servidor (null si aún no hay nada útil). Misma forma que backend/app/schemas.py › clean_memoria. */
+function pack(M) {
+  if (!M || !M.n) return null;
+  const hechos = Object.keys(M.facts).sort((a, b) => M.facts[a].n - M.facts[b].n).map((k) => ({ campo: k, valor: M.facts[k].v }))
+    .concat(M.dec.map((d) => ({ campo: 'decision', valor: d }))).slice(-MAX_FACTS);
+  const parts = [];
+  if (M.adv.length) parts.push('Lo que Astro le ha aconsejado antes: ' + M.adv.map((a) => (a.t ? '[' + TOPICS[a.t] + '] ' : '') + '«' + a.c + '»').join(' · ') + '.');
+  if (M.done) parts.push('Ya completó: «' + M.done + '».');
+  const o = { resumen: parts.join(' ').slice(0, 700), hechos: hechos, temas: M.topics.slice(-MAX_TOPICS), pendiente: M.step, turnos: M.n };
+  return (o.resumen || o.hechos.length || o.temas.length || o.pendiente) ? o : null;
+}
+/** Texto en llano de lo que Astro recuerda («¿Qué recuerdas?»). null si no hay nada. */
+function describe(M) {
+  if (!M || (!M.n && !M.topics.length && !Object.keys(M.facts).length)) return null;
+  const L = [];
+  if (M.topics.length) L.push('**Temas que hemos tocado:** ' + M.topics.map((t) => TOPICS[t]).join(', ') + '.');
+  const ks = Object.keys(M.facts).sort((a, b) => M.facts[a].n - M.facts[b].n);
+  if (ks.length) L.push('**Cifras que me has dado:** ' + ks.map((k) => k + ' = ' + M.facts[k].v).join(' · ') + '.');
+  if (M.dec.length) L.push('**Decisiones que me has contado:** ' + M.dec.map((d) => '«' + d + '»').join(' · ') + '.');
+  if (M.adv.length) L.push('**Lo último que te he aconsejado:** «' + M.adv[M.adv.length - 1].c + '».');
+  if (M.step) L.push('**Paso pendiente:** «' + M.step + '».');
+  if (M.done) L.push('**Último paso que hiciste:** «' + M.done + '».');
+  return L.length ? L.join('\n') : null;
+}
+function forget(M) { const e = empty(); if (M) Object.keys(e).forEach((k) => { M[k] = e[k]; }); return M || e; }
+
+const API = { TOPICS: TOPICS, empty: empty, clean: clean, learn: learn, answered: answered, pack: pack, describe: describe, forget: forget, topicOf: topicOf, strategic: strategic, fold: fold };
+if (typeof module !== 'undefined' && module.exports) module.exports = API;
+if (typeof LV !== 'undefined') LV.mem = API;
+})();
+
+/* ============================================================
    Asistente ValidLance · base de conocimiento (solo datos, sin lógica)
    · KB: consejos por modelo de negocio (precio, público, competencia, landing, trámites…), orientativos.
    · GATE: rasgos de cada modelo para comentar y comparar en la pantalla de selección.
@@ -9308,47 +11366,48 @@ const NEAR = { saas: ['serv', 'info'], trade: ['info', 'crea'], serv: ['saas', '
 
 // ---------- ValidLance y sus módulos ----------
 const MODS = {
-  modelo: { t: 'Selección de modelo', one: 'Fija tu tipo de negocio para que toda la app hable tu idioma.', what: 'Adapta el lenguaje, las métricas, los campos y los análisis (competencia, precios, público y landings) al tipo de negocio que elijas. Puedes cambiarlo cuando quieras.' },
-  panel: { t: 'Panel', one: 'Tu proyecto de un vistazo.', what: 'Resume el progreso por fase, las métricas, el veredicto Go / No-Go y te dice cuál es el siguiente paso.' },
-  valida: { t: 'Valida', one: 'Mide si hay demanda real.', what: 'Publicas una landing y una encuesta y mides visitas, registros, intención de compra y cuánta gente pagaría. Compara tus cifras con mínimos orientativos y te da un veredicto. Las cifras las anotas tú cuando tengas respuestas reales: no hay datos de ejemplo.' },
-  compite: { t: 'Compite', one: 'Estudia el mercado y a tu competencia.', what: 'Escribes tu idea con tus palabras y genera un informe con el mercado (TAM, SAM y SOM), los competidores y sus cuotas, el precio y el público, los riesgos con su estrategia y un plan de acción. Cada cifra va marcada como publicada o estimada.' },
-  lanza: { t: 'Lanza', one: 'Ordena los trámites, costes y plazos.', what: 'Es una lista de tareas para arrancar (alta, impuestos, privacidad, contratos…) con costes y plazos orientativos, adaptada a tu modelo. Cada tarea se marca como pendiente, en curso o hecha.' },
-  genera: { t: 'Genera', one: 'Crea la landing de tu idea.', what: 'Es un estudio de landings con vista previa en directo: eliges tono, color y textos, y cuando te gusta la publicas para empezar a medir la demanda.' },
+  modelo: { t: 'Selección de modelo', one: 'Fija tu tipo de negocio y la app habla tu idioma.', what: 'Adapta lenguaje, métricas, campos y análisis (competencia, precios, público y landings) a tu tipo de negocio. Puedes cambiarlo cuando quieras.' },
+  hub: { t: 'Centro de control', one: 'Todos los módulos en un solo sitio.', what: 'Una tarjeta por módulo (competencia, precios y público, landing, validación, trámites y panel). Cada una te lleva directo a su sección. Yo te sugiero por cuál empezar.' },
+  panel: { t: 'Panel', one: 'Tu proyecto de un vistazo.', what: 'Progreso por fase, métricas, veredicto Go / No-Go y tu siguiente paso.' },
+  valida: { t: 'Valida', one: 'Mide si hay demanda real.', what: 'Publicas una landing y una encuesta. Mides visitas, registros, intención de compra y cuántos pagarían. Comparas con mínimos orientativos y te da un veredicto. Las cifras las anotas tú: no hay datos de ejemplo.' },
+  compite: { t: 'Compite', one: 'Estudia el mercado y a tu competencia.', what: 'Cuentas tu idea con tus palabras y sale un informe: mercado (TAM, SAM y SOM), rivales y cuotas, precio y público, riesgos con estrategia y plan de acción. Cada cifra va marcada como publicada o estimada.' },
+  lanza: { t: 'Lanza', one: 'Ordena trámites, costes y plazos.', what: 'Lista de tareas para arrancar (alta, impuestos, privacidad, contratos…) con costes y plazos orientativos para tu modelo. Marcas cada una como pendiente, en curso o hecha.' },
+  genera: { t: 'Genera', one: 'Crea la landing de tu idea.', what: 'Estudio de landings con vista previa en directo. Eliges tono, color y textos, y la publicas para medir la demanda.' },
 };
 const APP = {
-  what: 'ValidLance te ayuda a comprobar si una idea de negocio merece la pena **antes de gastar dinero**.',
-  how: 'Primero eliges tu modelo de negocio. Después trabajas en 4 fases: **Valida** (demanda), **Compite** (mercado y rivales), **Lanza** (trámites) y **Genera** (tu landing). El **Panel** lo resume y te dice el siguiente paso.',
-  order: ['Elige tu **modelo de negocio**.', 'Cuenta tu idea en **Compite** y revisa mercado, rivales, precio y riesgos.', 'Crea tu landing en **Genera** y publícala para medir demanda en **Valida**.', 'Cuando los números acompañen, prepara los trámites en **Lanza**.'],
-  data: 'Tu proyecto se guarda **en este navegador**. El análisis de Compite se calcula en tu navegador y no se envía nada. Si borras los datos del navegador o reinicias el proyecto, se pierde.',
-  honest: 'En ValidLance **no hay cifras de ejemplo**: las de Valida las anotas tú y las de mercado se marcan como **publicadas** o **estimadas**, siempre a partir de tu idea. Es una herramienta de orientación: no sustituye un estudio de mercado ni asesoramiento legal o financiero.',
-  diff: '**Valida** mira a tus futuros clientes (¿hay demanda?). **Compite** mira al mercado y a tus rivales (¿hay sitio y cuánto?). Se complementan: una dice si hay interés, la otra cuánto espacio hay.',
+  what: 'ValidLance comprueba si tu idea merece la pena **antes de que gastes dinero**.',
+  how: 'Eliges tu modelo y llegas al **Centro de control**; de ahí abres cada módulo con un toque. Trabajas en 4 fases: **Valida** (demanda), **Compite** (mercado y rivales), **Lanza** (trámites) y **Genera** (tu landing). El **Panel** lo resume y te marca el siguiente paso.',
+  order: ['Elige tu **modelo de negocio** y entra al **Centro de control**.', 'Cuenta tu idea en **Compite** y revisa mercado, rivales, precio y riesgos.', 'Crea tu landing en **Genera** y publícala para medir demanda en **Valida**.', 'Cuando los números acompañen, prepara los trámites en **Lanza**.'],
+  data: 'Tu proyecto se guarda **en este navegador**. El análisis de Compite se calcula ahí mismo y no se envía nada. Si borras los datos del navegador o reinicias el proyecto, se pierde.',
+  honest: 'Sin cifras de ejemplo: las de Valida las anotas tú y las de mercado van marcadas como **publicadas** o **estimadas**. Es orientación: no sustituye un estudio de mercado ni asesoramiento legal o financiero.',
+  diff: '**Valida** mira a tus clientes: ¿hay demanda? **Compite** mira al mercado: ¿hay sitio? Una te dice si hay interés; la otra, cuánto espacio.',
 };
 
 // ---------- glosario en lenguaje llano ----------
 // n: nombre · d: definición · c: cómo se calcula o cómo se lee · tip: qué hacer con ello
 const GLOSS = {
-  tam: { n: 'TAM · mercado total', d: 'Todo el dinero que se gasta al año en tu sector en España. Es el techo teórico: nadie vende a todo ese mercado.', c: 'Se toma de cifras publicadas cuando existen y, si no, se estima. Cada informe indica cuál de las dos es.', tip: 'Sirve para saber si el sector es grande o pequeño, no cuánto vas a facturar.' },
-  sam: { n: 'SAM · mercado que puedes atender', d: 'La parte del mercado total que de verdad podrías servir por tu zona geográfica y tu tipo de cliente.', c: 'TAM × alcance geográfico × parte del sector que atiendes. Los dos porcentajes son suposiciones que puedes mover en los deslizadores de Compite.', tip: 'Si tu SAM es muy pequeño, plantéate ampliar zona o tipo de cliente.' },
-  som: { n: 'SOM · lo que puedes captar', d: 'Lo que podrías facturar de forma realista el primer año con tu presupuesto.', c: 'Clientes que alcanzas con la parte de tu presupuesto que destinas a marketing × ingreso anual por cliente. Es un techo del primer año, no una previsión.', tip: 'Es el número que más importa para decidir si arrancas: compáralo con lo que necesitas ganar.' },
-  cuota: { n: 'Cuota de mercado', d: 'Qué parte del gasto del sector se lleva cada competidor.', c: 'Cada rival lleva su cuota (publicada o estimada) y el resto es mercado repartido o sin cubrir.', tip: 'Si los tres mayores suman mucho, es difícil entrar de frente; si suman poco, el mercado está repartido y hay hueco.' },
-  sat: { n: 'Saturación', d: 'Cuánta oferta parecida a la tuya existe ya para tu tipo de cliente.', c: 'Es un perfil del sector de ValidLance, ajustado por tu ámbito y tu público concreto.', tip: 'Con saturación alta no compitas de frente: busca un nicho o un hueco concreto.' },
-  unserved: { n: 'Demanda sin cubrir', d: 'La parte de los clientes que aún no tiene una solución que les satisfaga.', c: 'Es un perfil estimado del sector.', tip: 'Es el espacio al que puedes llegar sin quitarle clientes a nadie.' },
-  grow: { n: 'Crecimiento del sector', d: 'Cuánto aumenta o baja el gasto del sector cada año.', c: 'Cifra publicada si existe; si no, una estimación orientativa.', tip: 'En un sector que crece, captar clientes nuevos es más fácil; en uno que se encoge, tendrás que quitárselos a otros.' },
-  cac: { n: 'Coste por cliente (CAC)', d: 'Lo que te cuesta conseguir un cliente de pago.', c: 'En Compite se calcula solo con anuncios: clic en Google ÷ conversión de la landing ÷ registros que acaban pagando.', tip: 'Compáralo con el máximo sano. Si lo supera, apóyate en canales gratuitos: comunidad, alianzas y recomendaciones.' },
-  ltv: { n: 'Valor de un cliente (LTV)', d: 'Lo que te deja un cliente durante todo el tiempo que se queda contigo.', c: 'Ingreso por cliente × margen × duración estimada de la relación.', tip: 'Un cliente solo compensa si lo que te deja supera con holgura lo que cuesta captarlo.' },
-  maxcac: { n: 'Máximo sano por cliente', d: 'Lo máximo que deberías pagar por captar un cliente sin perder dinero.', c: 'Un tercio de lo que vale un cliente (LTV).', tip: 'Si tu coste real por cliente lo supera, ese canal no sale a cuenta.' },
-  be: { n: 'Punto de equilibrio', d: 'El número de clientes con el que cubres tus costes fijos y empiezas a ganar.', c: 'Costes fijos del mes ÷ lo que te deja cada cliente tras costes variables.', tip: 'Compáralo con los clientes que puedes alcanzar con tu presupuesto: si no llegas, ajusta precio, costes o canales.' },
-  cpc: { n: 'Coste por clic (CPC)', d: 'Lo que pagas cada vez que alguien hace clic en tu anuncio.', c: 'Es una estimación a partir de referencias internacionales ajustadas a España: no hay un dato público exacto.', tip: 'Contrástalo gratis con el Planificador de palabras clave de Google Ads antes de invertir.' },
-  conv: { n: 'Conversión de la landing', d: 'De cada 100 visitas, cuántas dejan sus datos.', c: 'Es una referencia publicada reducida porque una marca nueva sin reseñas convierte menos.', tip: 'Mide tu cifra real con Valida: es el dato que más cambia el resultado.' },
-  viab: { n: 'Puntuación de viabilidad', d: 'Una nota de 0 a 100 que resume si la idea se sostiene.', c: 'Combina seis factores: demanda, espacio frente a la competencia, diferenciación, economía, operativa y captación.', tip: 'No es una predicción: es una orientación. Mira qué factores tiran de ella hacia abajo y mejora esos.' },
-  prob: { n: 'Probabilidad de éxito', d: 'Una estimación orientativa de cuántas ideas parecidas salen adelante.', c: 'Sale de la puntuación de viabilidad y del índice de riesgo.', tip: 'Úsala para comparar versiones de tu idea entre sí, no como promesa.' },
-  riesgo: { n: 'Índice de riesgo', d: 'Cuánto peso tienen los factores que pueden hacer fracasar la idea.', c: 'Cada riesgo tiene una gravedad y se enlaza con una estrategia y una acción.', tip: 'Empieza por el riesgo que más afecte a tu primer cliente.' },
-  oceano: { n: 'Océano azul · propuestas de diferenciación', d: 'Una forma de competir donde casi nadie compite, en lugar de pelear por lo mismo que todos.', c: 'Compite propone mejoras (crear, aumentar, reducir o eliminar algo) y calcula cuánto sube tu viabilidad si las aplicas.', tip: 'Aplica al menos dos propuestas y mira cuánto sube la puntuación.' },
-  fuente: { n: 'Publicado, estimado o tuyo', d: 'Cada cifra indica de dónde sale.', c: '**Publicado**: viene de una fuente con enlace. **Estimado**: lo calcula ValidLance con un método que puedes ver. **Tuyo**: lo has escrito tú.', tip: 'Fíate más de lo publicado y contrasta lo estimado con clientes reales.' },
-  churn: { n: 'Baja mensual (churn)', d: 'El porcentaje de clientes que se da de baja cada mes.', c: 'Perder el 5 % al mes es perder casi la mitad de las cuentas en un año.', tip: 'En suscripciones manda sobre casi todo: cuídala antes que la captación.' },
-  mvp: { n: 'Prototipo mínimo (MVP)', d: 'La versión más pequeña de tu producto que ya permite que alguien lo pruebe o pague.', c: 'Puede ser una hoja de cálculo, un formulario o una página con un botón de «reservar».', tip: 'Prueba la idea antes de construirla entera.' },
-  landing: { n: 'Landing', d: 'Una página con un solo objetivo: que la persona deje su email o reserve.', c: 'Genera la crea con una estructura pensada para tu modelo.', tip: 'Un mensaje, un botón y una prueba real cerca de él.' },
-  go: { n: 'Veredicto Go / No-Go', d: 'La conclusión de Valida: seguir, ajustar o parar.', c: 'Compara las cifras reales que anotes con mínimos orientativos de tu modelo.', tip: 'Con pocas respuestas la señal no es fiable: consigue al menos el mínimo de encuestas.' },
+  tam: { n: 'TAM · mercado total', d: 'Todo el dinero que se gasta al año en tu sector en España. Es el techo: nadie vende a todo ese mercado.', c: 'Cifra publicada si existe; si no, estimada. Cada informe dice cuál es.', tip: 'Úsalo para ver si el sector es grande o pequeño, no para prever tus ventas.' },
+  sam: { n: 'SAM · mercado que puedes atender', d: 'La parte del mercado total que puedes servir de verdad, por zona y tipo de cliente.', c: 'TAM × alcance geográfico × parte del sector que atiendes. Los dos porcentajes los mueves en los deslizadores de Compite.', tip: 'Si es muy pequeño, amplía zona o tipo de cliente.' },
+  som: { n: 'SOM · lo que puedes captar', d: 'Lo que podrías facturar de forma realista el primer año con tu presupuesto.', c: 'Clientes que alcanzas con tu presupuesto de marketing × ingreso anual por cliente. Es un techo, no una previsión.', tip: 'Es la cifra clave para decidir si arrancas: compárala con lo que necesitas ganar.' },
+  cuota: { n: 'Cuota de mercado', d: 'La parte del gasto del sector que se lleva cada rival.', c: 'Cada rival lleva su cuota (publicada o estimada). El resto es mercado repartido o sin cubrir.', tip: 'Si los 3 mayores suman mucho, entrar de frente es difícil. Si suman poco, hay hueco.' },
+  sat: { n: 'Saturación', d: 'Cuánta oferta parecida a la tuya ya existe para tu tipo de cliente.', c: 'Perfil del sector en ValidLance, ajustado a tu ámbito y a tu público.', tip: 'Si es alta, no compitas de frente: busca un nicho.' },
+  unserved: { n: 'Demanda sin cubrir', d: 'Clientes que aún no tienen una solución que les convenza.', c: 'Perfil estimado del sector.', tip: 'Es el espacio al que llegas sin quitarle clientes a nadie.' },
+  grow: { n: 'Crecimiento del sector', d: 'Cuánto sube o baja el gasto del sector cada año.', c: 'Cifra publicada si existe; si no, estimación orientativa.', tip: 'Si crece, captar clientes nuevos es más fácil. Si se encoge, se los quitarás a otros.' },
+  cac: { n: 'Coste por cliente (CAC)', d: 'Lo que te cuesta conseguir un cliente de pago.', c: 'En Compite se calcula solo con anuncios: clic en Google ÷ conversión de la landing ÷ registros que acaban pagando.', tip: 'Compáralo con el máximo sano. Si lo supera, empieza por canales gratuitos: comunidad, alianzas y recomendaciones.' },
+  ltv: { n: 'Valor de un cliente (LTV)', d: 'Lo que te deja un cliente en todo el tiempo que se queda contigo.', c: 'Ingreso por cliente × margen × duración estimada de la relación.', tip: 'Compensa solo si supera con holgura lo que cuesta captarlo.' },
+  maxcac: { n: 'Máximo sano por cliente', d: 'Lo máximo que puedes pagar por un cliente sin perder dinero.', c: 'Un tercio de lo que vale un cliente (LTV).', tip: 'Si tu coste real lo supera, ese canal no sale a cuenta.' },
+  be: { n: 'Punto de equilibrio', d: 'Los clientes que necesitas para cubrir tus costes fijos y empezar a ganar.', c: 'Costes fijos del mes ÷ lo que te deja cada cliente tras costes variables.', tip: 'Compáralo con los clientes que alcanzas. Si no llegas, ajusta precio, costes o canales.' },
+  cpc: { n: 'Coste por clic (CPC)', d: 'Lo que pagas cada vez que alguien hace clic en tu anuncio.', c: 'Estimación con referencias internacionales ajustadas a España. No hay un dato público exacto.', tip: 'Contrástalo gratis con el Planificador de palabras clave de Google Ads antes de invertir.' },
+  conv: { n: 'Conversión de la landing', d: 'De cada 100 visitas, cuántas dejan sus datos.', c: 'Referencia publicada, reducida porque una marca nueva sin reseñas convierte menos.', tip: 'Mide tu cifra real en Valida: es la que más cambia el resultado.' },
+  viab: { n: 'Puntuación de viabilidad', d: 'Una nota de 0 a 100 que resume si tu idea se sostiene.', c: 'Combina 6 factores: demanda, espacio frente a rivales, diferenciación, economía, operativa y captación.', tip: 'Es orientación, no predicción. Mejora los factores que más la bajan.' },
+  prob: { n: 'Probabilidad de éxito', d: 'Estimación orientativa de cuántas ideas parecidas salen adelante.', c: 'Sale de la puntuación de viabilidad y del índice de riesgo.', tip: 'Úsala para comparar versiones de tu idea, no como promesa.' },
+  riesgo: { n: 'Índice de riesgo', d: 'Cuánto pesan los factores que pueden hacer fracasar la idea.', c: 'Cada riesgo tiene gravedad, estrategia y acción.', tip: 'Empieza por el que más afecte a tu primer cliente.' },
+  oceano: { n: 'Océano azul · propuestas de diferenciación', d: 'Competir donde casi nadie compite, en vez de pelear por lo mismo que todos.', c: 'Compite propone mejoras (crear, aumentar, reducir o eliminar algo) y calcula cuánto sube tu viabilidad.', tip: 'Aplica al menos 2 propuestas y mira cuánto sube la nota.' },
+  fuente: { n: 'Publicado, estimado o tuyo', d: 'Cada cifra indica de dónde sale.', c: '**Publicado**: fuente con enlace. **Estimado**: lo calcula ValidLance con un método visible. **Tuyo**: lo escribiste tú.', tip: 'Fíate más de lo publicado. Contrasta lo estimado con clientes reales.' },
+  churn: { n: 'Baja mensual (churn)', d: 'El % de clientes que se da de baja cada mes.', c: 'Perder el 5 % al mes es perder casi la mitad de las cuentas en un año.', tip: 'En suscripciones manda sobre casi todo: cuídala antes que la captación.' },
+  mvp: { n: 'Prototipo mínimo (MVP)', d: 'La versión más pequeña de tu producto que ya permite probarlo o pagarlo.', c: 'Puede ser una hoja de cálculo, un formulario o una página con botón de «reservar».', tip: 'Prueba la idea antes de construirla entera.' },
+  landing: { n: 'Landing', d: 'Una página con un solo objetivo: que dejen su email o reserven.', c: 'Genera la crea con una estructura pensada para tu modelo.', tip: 'Un mensaje, un botón y una prueba real cerca.' },
+  go: { n: 'Veredicto Go / No-Go', d: 'La conclusión de Valida: seguir, ajustar o parar.', c: 'Compara tus cifras reales con mínimos orientativos de tu modelo.', tip: 'Con pocas respuestas la señal no es fiable: llega al mínimo de encuestas.' },
 };
 
 // ---------- ideas de partida (para quien no sabe por dónde empezar) ----------
@@ -9377,6 +11436,485 @@ const AREAS = [
 const API = { KB: KB, GATE: GATE, NEAR: NEAR, MODS: MODS, APP: APP, GLOSS: GLOSS, STARTERS: STARTERS, AREAS: AREAS };
 if (typeof module !== 'undefined' && module.exports) module.exports = API;
 if (typeof LV !== 'undefined') LV.agentKB = API;
+})();
+
+/* ============================================================
+   Astro · inteligencia de mercado por sector (datos con fuente y fecha + motor de comparación)
+   · BM: referencias por modelo de negocio (SaaS, e-commerce, servicios, infoproductos, trading, creadores,
+         marketplaces, negocio local, proyecto personal) y GEN (base común) y B2B (embudo de empresas).
+   · Cada cifra lleva su fuente (SRC) y su fecha. Las fuentes secundarias (blogs y recopilatorios) van marcadas
+     (sec) y con una confianza (c: 1 alta · 2 media · 3 baja). Astro las presenta como «referencias», nunca como hechos.
+   · Son cifras de referencia de una consulta puntual (oct. 2026), NO un flujo en tiempo real. Si tienes tu propio origen
+     de datos, LV.intel.setProvider(fn) los mezcla encima y marca la fecha de actualización.
+   · compare(D, fam, seg) pone las cifras del análisis de Compite frente a esas referencias y detecta las brechas;
+     advise(...) las convierte en un diagnóstico con palancas concretas.
+   Sin DOM: se puede probar con Node.  API: LV.intel.{radar, trends, wins, traps, kpis, compare, advise, nudge, refs, sources, setProvider}
+   ============================================================ */
+(function () {
+'use strict';
+const ASOF = 'oct. 2026';
+
+// ---------- fuentes (consultadas el 24/10/2026) ----------
+// tag: nombre corto para citar en el chat · d: fecha de la publicación o de los datos · sec: fuente secundaria · c: confianza
+const SRC = {
+  cnmc: { tag: 'CNMC 2026', n: 'CNMC · Comercio electrónico, 1.er trimestre de 2026', d: '02/10/2026', u: 'https://www.cnmc.es/sites/default/files/editor_contenidos/Notas%20de%20prensa/2026/20261002_NP_CE_I_26.pdf', c: 1 },
+  ine: { tag: 'INE 2025', n: 'INE · Demografía armonizada de empresas (año 2023)', d: '12/11/2025', u: 'https://ine.es/dyngs/Prensa/DAE2023.htm', c: 1 },
+  baymard: { tag: 'Baymard 2025', n: 'Baymard Institute · Abandono de carrito (50 estudios)', d: '22/09/2025', u: 'https://baymard.com/lists/cart-abandonment-rate', c: 1 },
+  iab: { tag: 'IAB Spain 2026', n: 'IAB Spain · Estudio de Redes Sociales 2026', d: '19/05/2026', u: 'https://iabspain.es/iab-spain-presenta-estudio-rrss-2026/', c: 2 },
+  cnmv23: { tag: 'CNMV 2023', n: 'The Corner · La CNMV prohíbe la publicidad de CFD (pérdidas del 70–90 % de minoristas)', d: '13/07/2023', u: 'https://thecorner.eu/news-spain/spain-economy/cnmv-bans-cfd-advertising-in-spain-over-70-of-investors-lose-money/110099/', sec: 1, c: 2 },
+  esma: { tag: 'ESMA 2018', n: 'ESMA · Prohibición de opciones binarias y límites a los CFD', d: '27/03/2018', u: 'https://www.esma.europa.eu/node/84933', c: 1 },
+  cnmv26: { tag: 'CNMV 2026', n: 'Finect · Guía de la CNMV «Finfluencers: cómo actuar con responsabilidad»', d: '25/05/2026', u: 'https://www.finect.com/usuario/eduardogarcia/articulos/4-consejos-basicos-de-la-cnmv-que-todos-los-finfluencers-deberian-seguir', sec: 1, c: 2 },
+  cbi: { tag: 'CB Insights', n: 'CB Insights · 101 autopsias de startups (vía Launchrock)', d: '2017', u: 'https://www.launchrock.com/library/expert-advice/why-do-startups-fail', sec: 1, c: 3 },
+  bmk: { tag: 'Benchmarkit 2025', n: 'Benchmarkit · SaaS H2 2025, +1.500 empresas con 1–100 M$ de ingresos (vía KnowledgeLib)', d: '11/03/2026', u: 'https://knowledgelib.io/finance/industry-benchmarks/saas-industry-benchmarks-2026/2026', sec: 1, c: 2 },
+  trial: { tag: 'Visionary 2026', n: 'Visionary Marketing · 84.200 pruebas gratuitas en 38 SaaS', d: 'mayo de 2026', u: 'https://visionary-marketing.co.uk/blog/saas-free-trial-conversion-statistics-2026', sec: 1, c: 3 },
+  g2: { tag: 'G2 2026', n: 'G2 · AI Agents Report 2026, 1.019 decisores B2B (vía SaaStr)', d: '16/10/2026', u: 'https://www.saastr.com/g2s-2026-ai-agents-report-only-9-of-buyers-think-seat-pricing-is-fair-57-want-usage-based-and-74-will-shop-you-at-renewal/', sec: 1, c: 2 },
+  shero: { tag: 'SaaS Hero 2026', n: 'SaaS Hero · CAC de SaaS por etapa (recopilatorio)', d: '2026', u: 'https://www.saashero.net/strategy/2026-b2b-saas-cac-benchmarks/', sec: 1, c: 3 },
+  shopb: { tag: 'KnowledgeLib e-com 2025', n: 'KnowledgeLib · E-commerce H2 2025, 25.000 tiendas DTC (EE. UU. y Europa occidental)', d: '11/03/2026', u: 'https://knowledgelib.io/business/industry-benchmarks/ecommerce-industry-benchmarks-2026/2026', sec: 1, c: 3 },
+  eightx: { tag: 'EightX 2026', n: 'EightX · KPIs de e-commerce en la UE 2026', d: '2026', u: 'https://eightx.co/blog/eu-ecommerce-kpi-benchmark', sec: 1, c: 3 },
+  ecom: { tag: 'Ticket España 2025', n: 'Modelos de plan de negocios · Mercado e-commerce en España', d: '2025', u: 'https://modelosdeplandenegocios.com/blogs/news/analisis-mercado-ecommerce-espana', sec: 1, c: 3 },
+  sync: { tag: 'SyncGTM 2026', n: 'SyncGTM · Embudo B2B (First Page Sage, SPOTIO, Gartner, Forrester)', d: '25/05/2026', u: 'https://syncgtm.com/blog/b2b-sales-funnel-conversion-rates', sec: 1, c: 3 },
+  spi: { tag: 'SPI Research 2026', n: 'Slidefactory · Utilización de agencias (SPI Research 2026, 509 firmas; Promethean 2026, 119 agencias)', d: '05/09/2026', u: 'https://www.theslidefactory.com/post/agency-utilization-rate', sec: 1, c: 2 },
+  jobbers: { tag: 'Jobbers 2026', n: 'Jobbers.io · Coste de captar clientes freelance (estimaciones; la web vende una plataforma)', d: 'junio de 2026', u: 'https://www.jobbers.io/freelance-client-acquisition-cost-cac-benchmark-report-2026-what-it-actually-costs-to-land-a-client/', sec: 1, c: 3 },
+  xolo: { tag: 'Xolo 2026', n: 'Xolo · Cuánto cobrar como freelance en España', d: '31/03/2026', u: 'https://blog.xolo.io/es/cuanto-cobrar-como-freelance-en-espa%C3%B1a-tarifas-y-como-calcularlas', sec: 1, c: 3 },
+  cuf: { tag: 'CUFinder 2026', n: 'CUFinder · Marketing de educación online 2026 (recopilatorio)', d: '26/06/2026', u: 'https://cufinder.io/blog/benchmarks/online-education/', sec: 1, c: 3 },
+  creat: { tag: 'CreatiCalc 2026', n: 'CreatiCalc · Economía de creadores 2026 (estimaciones propias)', d: 'oct. 2026', u: 'https://creaticalc.com/creator-economy-benchmarks', sec: 1, c: 3 },
+  lowc: { tag: 'LowCode 2026', n: 'LowCode Agency · Unit economics de marketplaces (guía propia, sin fuentes)', d: '24/09/2026', u: 'https://www.lowcode.agency/blog/marketplace-unit-economics-gmv-explained', sec: 1, c: 3 },
+  skello: { tag: 'Skello 2026', n: 'Skello · Rentabilidad de un restaurante', d: '28/09/2026', u: 'https://www.skello.es/blog/rentabilidad-restaurante', sec: 1, c: 3 },
+  patreon: { tag: 'Schoolmaker 2026', n: 'Schoolmaker · Patreon, Ko-fi, Buy Me a Coffee y Substack', d: '2026', u: 'https://schoolmaker.com/blog/patreon-pricing', sec: 1, c: 3 },
+};
+const CONF = { 1: 'fuente oficial o primaria', 2: 'fuente intermedia', 3: 'fuente secundaria: contrástala' };
+
+// ---------- referencias por modelo ----------
+// head: conclusión de una línea · key: cifras clave (t: texto listo para el chat; cmp: umbral comparable con tu análisis)
+// trends / wins / traps: tendencias, patrones de éxito y errores típicos, cada uno con su fuente (s)
+// levers: qué hacer cuando una cifra tuya queda por debajo (ltvcac, payback, margin, ads, reach)
+const GEN = {
+  n: 'Cualquier negocio', head: 'Solo 4 de cada 10 empresas siguen activas a los 5 años: valida antes de gastar.',
+  key: [
+    { t: 'Supervivencia de las empresas creadas en 2018: ≈ 77 % al año, ≈ 55 % a los 3 y ≈ 42 % a los 5.', s: 'ine' },
+    { t: 'Entre 101 startups que cerraron, el 42 % dijo «no había necesidad de mercado» y el 29 % se quedó sin caja.', s: 'cbi' },
+    { t: 'Regla común: cada cliente debe valer al menos 3 veces lo que cuesta captarlo (LTV/CAC ≥ 3×).', s: 'bmk' },
+  ],
+  trends: [{ t: 'Los nacimientos de empresas (9,1 %) superan a las muertes (7,8 %): hay más gente emprendiendo, así que la competencia sube.', s: 'ine' }],
+  wins: [{ t: 'Quien valida la demanda con clientes reales antes de construir evita la causa nº 1 de cierre (42 %).', s: 'cbi' }],
+  traps: [{ t: 'Construir sin pruebas de demanda: es la causa más citada de cierre (42 %).', s: 'cbi' }, { t: 'Gastar la caja antes de saber cuánto cuesta captar un cliente (29 % se quedó sin dinero).', s: 'cbi' }],
+  kpis: ['LTV/CAC ≥ 3×', 'Recuperar el CAC en ≤ 12 meses', 'Caja para ≥ 6 meses de costes fijos'],
+  levers: {
+    ltvcac: ['Captar por canales baratos primero: referidos, comunidad y contenido antes que anuncios.', 'Subir lo que deja cada cliente: precio, paquete anual o venta recurrente.'],
+    payback: ['Cobrar por adelantado (plan anual o señal) para recuperar el coste de captar antes.', 'Recortar el coste de captar con un solo canal que ya funcione.'],
+    margin: ['Revisar precio y costes variables: cada punto de margen mejora todo lo demás.', 'Quitar lo que hagas a medida y no cobres.'],
+    ads: ['Empieza con canales gratuitos y usa los anuncios solo para escalar lo que ya convierte.', 'Prueba con 100–200 € repartidos en 3 canales antes de comprometer presupuesto.'],
+    reach: ['Baja costes fijos o sube el precio hasta que tu presupuesto cubra el punto de equilibrio.', 'Valida con 10 pagos reales antes de ampliar.'],
+  },
+};
+const B2B = {
+  n: 'Venta a empresas (B2B)',
+  key: [
+    { t: 'De cada 100 visitas, entre 1,5 y 5 dejan sus datos (mediana ≈ 2,9). Por referido ≈ 2,9; por anuncios sociales ≈ 0,9.', s: 'sync' },
+    { t: 'De los contactos que llegan solos, entre el 1 y el 3 % acaba comprando; en venta en frío, entre el 0,5 y el 1,5 %.', s: 'sync' },
+    { t: 'Una propuesta se cierra entre el 15 y el 30 % de las veces.', s: 'sync' },
+    { t: 'Ciclo de venta orientativo: 30–60 días si el contrato es pequeño (< 25.000 €) y 60–120 si es medio (sin fuente primaria).', s: 'sync' },
+  ],
+  trends: [{ t: 'El 74 % de los compradores de agentes de IA está abierto a cambiar de proveedor en la renovación: retener se trabaja todo el año.', s: 'g2' }],
+  levers: { conv: ['Pide una sola acción por página y enseña pruebas (casos, cifras) cerca del botón.', 'Prioriza referidos y contenido: convierten el triple que los anuncios sociales (2,9 % frente a 0,9 %).'] },
+};
+
+const BM = {
+  saas: {
+    n: 'Software y apps (SaaS)', head: 'En SaaS gana quien recupera el coste de captar en menos de 12 meses.',
+    key: [
+      { tg: 'costs,ads', id: 'payback', t: 'Recuperar el coste de captar: pymes ≈ 11 meses (rango 6–14); con producto de autoservicio ≈ 6.', s: 'bmk', cmp: { lo: 6, mid: 11, hi: 14 } },
+      { tg: 'ads,costs', id: 'ltvcac', t: 'Valor del cliente frente a su coste: pymes ≈ 2,8× y medianas ≈ 3,6×. La meta común es ≥ 3×.', s: 'bmk', cmp: { lo: 2, mid: 3, hi: 3.6 } },
+      { tg: 'price,costs', id: 'margin', t: 'Margen bruto: SaaS puro ≈ 78 % (72–84); si añades servicios a medida, ≈ 65 %.', s: 'bmk', cmp: { lo: 65, mid: 78, hi: 84 } },
+      { t: 'Bajas: las pymes pierden ≈ 12 % de sus ingresos al año (8–18 %).', s: 'bmk' },
+      { tg: 'price,land', t: 'De prueba a pago: ≈ 25 % sin tarjeta y ≈ 60 % con tarjeta (con ≈ 70 % menos altas). La prueba de 14 días rinde más (≈ 28 %).', s: 'trial' },
+      { tg: 'chan,ads', t: 'Coste por cliente de autoservicio: ≈ 700 $ de mediana; con ventas, de 500 a 20.000 $ según el contrato.', s: 'shero' },
+    ],
+    trends: [
+      { t: 'El pago por uso o por resultado gana: el 57 % de los decisores B2B lo ve más justo para agentes de IA; solo el 9 % prefiere pagar por puesto.', s: 'g2', do: 'Ofrece un plan base más un tramo por uso.' },
+      { t: 'La eficiencia pesa más que el crecimiento: la «regla del 40» mediana subió de 25 % (2024) a 32 % (2025).', s: 'bmk', do: 'Cuida el margen y el payback antes de acelerar.' },
+      { t: 'El 74 % de los compradores de agentes de IA estaría dispuesto a cambiar de proveedor en la renovación.', s: 'g2', do: 'Mide el uso cada mes y avisa antes de renovar.' },
+    ],
+    wins: [
+      { t: 'Medir la activación: quien activa durante la prueba paga el 47 %; quien no, el 4 %.', s: 'trial' },
+      { t: 'Prueba de 14 días: convierte ≈ 28 %, frente a ≈ 25 % en 7 días y ≈ 22 % en 30.', s: 'trial' },
+      { t: 'Nicho estrecho y un canal repetible: es lo que mantiene el payback por debajo de 12 meses.', s: 'bmk' },
+    ],
+    traps: [
+      { t: 'Cobrar solo por puesto un producto de IA o automatización: solo el 9 % lo ve justo.', s: 'g2' },
+      { t: 'Pedir tarjeta en la prueba con tráfico frío: convierte más, pero llegan ≈ 70 % menos personas.', s: 'trial' },
+      { t: 'Dejar el servicio a medida sin cobrar: arrastra el margen del 78 % al 65 %.', s: 'bmk' },
+    ],
+    kpis: ['Margen bruto ≥ 72 %', 'LTV/CAC ≥ 3×', 'Payback ≤ 12 meses', 'Bajas de ingresos ≤ 12 % anual', 'Activación en la prueba ≥ 50 %'],
+    levers: {
+      ltvcac: ['Prioriza referidos, SEO y comunidad: payback corto frente a anuncios.', 'Plan anual con descuento: sube el valor del cliente sin gastar más en captar.', 'Mide activación: quien activa paga ≈ 47 % frente a ≈ 4 %.'],
+      payback: ['Prueba de 14 días con aviso el día 10: es la duración que mejor convierte (≈ 28 %).', 'Guía el primer uso: la activación pesa más que el precio.'],
+      margin: ['Cobra por separado lo que sea a medida: con servicios el margen baja de ≈ 78 % a ≈ 65 %.', 'Vigila el coste de servidores e IA por cliente desde el primer día.'],
+    },
+  },
+  shop: {
+    n: 'E-commerce y producto', head: 'En e-commerce el dinero se pierde en el carrito y en las devoluciones.',
+    key: [
+      { tg: 'land,ads', id: 'conv', t: 'Conversión media ≈ 3,1 % de las visitas: belleza ≈ 3,8 %, hogar ≈ 2,4 %, moda ≈ 2,2 %, electrónica ≈ 1,6 %.', s: 'shopb', cmp: { lo: 1.6, mid: 3.1, hi: 4.8 } },
+      { tg: 'land', t: 'Siete de cada diez compradores abandonan el carrito (70 %); lo que más empuja son los costes extra (40 %).', s: 'baymard' },
+      { tg: 'ads,chan,costs', id: 'ltvcac', t: 'Captar un cliente cuesta ≈ 55 $ en belleza, ≈ 85 $ en moda y ≈ 98 $ en electrónica; valor/coste: belleza ≈ 3,8×, moda ≈ 2,8×.', s: 'shopb', cmp: { lo: 2, mid: 3, hi: 3.8 } },
+      { tg: 'costs', t: 'Devoluciones: moda ≈ 26 %, calzado ≈ 22 %, electrónica ≈ 10 %, belleza ≈ 8 %.', s: 'shopb' },
+      { tg: 'price,costs', id: 'margin', t: 'Margen bruto de marcas directas al consumidor: mediana ≈ 57 %.', s: 'eightx', cmp: { lo: 44, mid: 57, hi: 70 } },
+      { t: 'España, 1.er trimestre de 2026: 29.643 M€ (+15,1 %) y más de 549 M de operaciones (+16 %).', s: 'cnmc' },
+      { t: 'Ticket medio de una compra online en España ≈ 91 € (2025).', s: 'ecom' },
+    ],
+    trends: [
+      { t: 'El comercio electrónico en España crece ≈ 15 % al año (1.er trimestre de 2026).', s: 'cnmc', do: 'Hay demanda: tu reto es diferenciarte, no «que compren online».' },
+      { t: 'Una de cada cuatro personas ya compra directamente en redes (35 % en la generación Z); el 54 % las consulta antes de comprar.', s: 'iab', do: 'Prueba una ficha de producto en Instagram o TikTok Shop.' },
+      { t: 'En móvil conviertes menos de la mitad que en escritorio (≈ 1,8 % frente a ≈ 3,9 %).', s: 'shopb', do: 'Optimiza el pago en móvil antes de comprar más tráfico.' },
+    ],
+    wins: [
+      { t: 'Mostrar el coste total (envío e impuestos) antes del pago: el 40 % abandona por costes extra y el 20 % por entrega lenta.', s: 'baymard' },
+      { t: 'Permitir comprar sin crear cuenta: el 18 % abandona por tener que registrarse; el 19 %, por desconfianza con la tarjeta.', s: 'baymard' },
+      { t: 'Elegir categorías con recompra y LTV/CAC alto (belleza ≈ 3,8×, alimentación ≈ 4,2×).', s: 'shopb' },
+    ],
+    traps: [
+      { t: 'Moda y electrónica: LTV/CAC cerca de 3× o por debajo, y devoluciones de hasta el 26 %.', s: 'shopb' },
+      { t: 'Pagar anuncios cuando captar un cliente cuesta ≈ 55–98 $ y el pedido medio ronda 91 €: queda poco margen.', s: 'shopb' },
+      { t: 'Esconder el envío hasta el último paso.', s: 'baymard' },
+    ],
+    kpis: ['Conversión ≥ 2 %', 'Abandono de carrito < 70 %', 'CAC ≤ un tercio del valor del cliente', 'Devoluciones según categoría', 'Margen bruto ≥ 50 %'],
+    levers: {
+      ltvcac: ['Sube el ticket con packs o envío gratis a partir de cierto importe.', 'Crea recompra: suscripción, recordatorio de reposición o club de clientes.'],
+      margin: ['Revisa proveedor y packaging; sube precio en lo que más se vende.', 'Baja devoluciones con mejores fotos, tallas y descripciones.'],
+      ads: ['Empieza por orgánico (Instagram, TikTok, SEO) y reserva anuncios para lo que ya vende.', 'Mide el coste real por pedido antes de escalar.'],
+    },
+  },
+  serv: {
+    n: 'Servicios y freelance', head: 'En servicios gana quien capta barato (referidos) y factura casi todas sus horas.',
+    key: [
+      { tg: 'chan,ads', t: 'Captar un cliente cuesta ≈ 0–150 $ por referido, 150–700 $ por LinkedIn y 400–5.000 $ o más con anuncios.', s: 'jobbers' },
+      { tg: 'costs,chan', t: 'El trabajo comercial se come entre el 15 y el 30 % del tiempo de un freelance.', s: 'jobbers' },
+      { tg: 'price,costs', id: 'margin', t: 'Margen medio de un proyecto ≈ 38 %; en agencias pequeñas, margen neto ≈ 19 %.', s: 'spi', cmp: { lo: 30, mid: 38, hi: 46 } },
+      { tg: 'costs', t: 'Horas facturables: pequeñas agencias 65–80 %; la media de 509 firmas ≈ 66 %; las mejores ≈ 75 %.', s: 'spi' },
+      { t: 'El 23 % del tiempo facturable no llega a la factura.', s: 'spi' },
+      { tg: 'price', t: 'Tarifas freelance en España: ≈ 18–70 €/h según el oficio.', s: 'xolo' },
+    ],
+    trends: [
+      { t: 'La utilización media de las firmas de servicios ronda el 66 %: el límite está en las horas facturables, no solo en el precio.', s: 'spi', do: 'Mide qué horas facturas de verdad cada mes.' },
+      { t: 'Las plataformas con comisión suben el coste real de captar: con un 20 % de comisión el coste efectivo puede llegar al ≈ 36 % del proyecto (ejemplo de la fuente).', s: 'jobbers', do: 'Usa plataformas para arrancar y pasa a referidos.' },
+    ],
+    wins: [
+      { t: 'Referidos primero: es el canal más barato (0–150 $ por cliente).', s: 'jobbers' },
+      { t: 'Paquetes cerrados con señal: el cliente compara paquetes, no horas, y cobras antes de empezar.', s: 'jobbers' },
+      { t: 'Medir la utilización: las firmas con las mejores cifras superan el 75 %.', s: 'spi' },
+    ],
+    traps: [
+      { t: 'Pagar anuncios para captar servicios: 400–5.000 $ o más por cliente.', s: 'jobbers' },
+      { t: 'No facturar todo el trabajo: se pierde el 23 % de las horas.', s: 'spi' },
+      { t: 'Vivir de plataformas con comisión: del 10 al 20 % de cada proyecto.', s: 'jobbers' },
+    ],
+    kpis: ['Horas facturables 65–80 %', 'Margen de proyecto ≥ 35 %', 'Coste de captar ≤ un tercio del primer proyecto', 'Tiempo comercial ≤ 25 %', 'Clientes recurrentes'],
+    levers: {
+      ltvcac: ['Convierte proyectos sueltos en retainer mensual: sube el valor del cliente.', 'Pide referidos al cerrar cada proyecto: es tu canal más barato.'],
+      payback: ['Cobra una señal del 30–50 % al aceptar: recuperas el coste de captar antes.', 'Prioriza clientes por referido sobre plataformas con comisión.'],
+      margin: ['Paquetes cerrados con alcance definido: evita horas sin cobrar.', 'Sube tarifa a clientes nuevos y mide qué horas se facturan de verdad.'],
+    },
+  },
+  info: {
+    n: 'Infoproductos y formación', head: 'En infoproductos, la comunidad y los lanzamientos pesan más que el contenido suelto.',
+    key: [
+      { tg: 'land,price', id: 'conv', t: 'Conversión de una página de venta de formación ≈ 3,2 % (las mejores, 5–6 %); desde una lista de email ≈ 4,5 %.', s: 'cuf', cmp: { lo: 2, mid: 3.2, hi: 5.5 } },
+      { tg: 'price', t: 'Finalización de un curso: ≈ 12,5 % si es a tu ritmo y ≈ 65 % si es en cohorte con fechas.', s: 'cuf' },
+      { tg: 'price,costs', t: 'En membresías, las bajas rondan el 9,4 % al mes y solo el 28 % sigue al cabo de un año.', s: 'cuf' },
+      { tg: 'ads,chan', t: 'Coste de captar un alumno (cursos de 100–2.000 €): ≈ 63 $ de media. El clic cuesta ≈ 1,15 $ en redes y ≈ 2,95 $ en buscador.', s: 'cuf' },
+      { tg: 'price', t: 'De prueba gratuita a pago, ≈ 18 %.', s: 'cuf' },
+    ],
+    trends: [
+      { t: 'La cohorte con fechas (65 % termina) gana al curso grabado a tu ritmo (12,5 %).', s: 'cuf', do: 'Lanza en cohortes y añade una comunidad.' },
+      { t: 'Las personas usan ≈ 7 redes de media (5,3 el año anterior): una audiencia propia (email) te protege de los cambios.', s: 'iab', do: 'Construye tu lista de email desde el día 1.' },
+    ],
+    wins: [
+      { t: 'Lista de email antes del lanzamiento: convierte ≈ 4,5 %, más que una visita fría (≈ 3,2 %).', s: 'cuf' },
+      { t: 'Cohortes con fechas y comunidad: el 65 % termina frente al 12,5 %, y quien termina recomienda.', s: 'cuf' },
+      { t: 'Producto de entrada barato para ganar confianza y subir después.', s: 'cuf' },
+    ],
+    traps: [
+      { t: 'Membresía sin hábito: con ≈ 9,4 % de bajas al mes, un cliente dura ≈ 11 meses de media.', s: 'cuf' },
+      { t: 'Curso grabado sin seguimiento: solo lo termina el 12,5 %.', s: 'cuf' },
+      { t: 'Pagar tráfico frío para vender un producto barato: el coste de captar (≈ 63 $) se come el margen.', s: 'cuf' },
+    ],
+    kpis: ['Conversión de la página ≥ 3 %', 'Conversión desde email ≥ 4 %', 'Finalización ≥ 50 % (cohorte)', 'Bajas mensuales ≤ 9 %', 'Reembolsos bajos'],
+    levers: {
+      ltvcac: ['Añade una oferta posterior (comunidad, mentoría) para quien termina: sube el valor del alumno.', 'Capta por lista de email y contenido gratuito antes que por anuncios.'],
+      payback: ['Lanza en cohortes con fechas: cobras antes y recuperas el coste de captar en el lanzamiento.'],
+      ads: ['Prueba primero con tu lista de email (≈ 4,5 %) y deja los anuncios para escalar.'],
+    },
+  },
+  trade: {
+    n: 'Trading e inversión', head: 'En trading el límite no es el mercado: es la regulación.',
+    key: [
+      { tg: 'land,chan', t: 'Entre el 70 y el 90 % de los minoristas pierde dinero con CFD, según la CNMV.', s: 'cnmv23' },
+      { t: 'Desde 2018 la UE prohíbe las opciones binarias a minoristas y limita el apalancamiento de los CFD.', s: 'esma' },
+      { t: 'En 2023 la CNMV prohibió la publicidad de CFD dirigida al público general y el uso de personajes conocidos.', s: 'cnmv23' },
+      { t: 'En 2026 la CNMV publicó una guía de conducta para «finfluencers».', s: 'cnmv26' },
+    ],
+    trends: [{ t: 'La supervisión de quien habla de inversión en redes es cada vez más estricta (guía de la CNMV, 2026).', s: 'cnmv26', do: 'Vende formación y método, no rentabilidad.' }],
+    wins: [{ t: 'Cuota fija por formación o comunidad, sin prometer resultados ni cobrar por éxito.', s: 'cnmv26' }, { t: 'Aviso de riesgo visible y transparencia sobre lo que no haces.', s: 'cnmv26' }],
+    traps: [{ t: 'Prometer rentabilidad o enseñar ganancias: es el mayor riesgo legal y de confianza.', s: 'cnmv26' }, { t: 'Promocionar CFD u opciones binarias a minoristas.', s: 'esma' }],
+    kpis: ['Cero promesas de rentabilidad', 'Aviso de riesgo en cada pieza', 'Bajas mensuales de la comunidad', 'Conversión de la landing'],
+    levers: { ads: ['No dependas de publicidad: la de CFD está restringida; crece con contenido educativo y email.'] },
+  },
+  crea: {
+    n: 'Creador de contenido', head: 'En creadores, el nicho decide cuánto cobras por cada mil vistas.',
+    key: [
+      { tg: 'price,costs', t: 'Ingresos por cada 1.000 vistas en YouTube (estimación): finanzas y negocios ≈ 7–25 $, tecnología ≈ 4–12 $, educación ≈ 3–10 $, comida ≈ 2–4 $.', s: 'creat' },
+      { tg: 'chan', t: 'Participación media: TikTok ≈ 4,3 %, Instagram ≈ 1,8 %, YouTube 1,4–5,2 % (sobre vistas).', s: 'creat' },
+      { tg: 'price', t: 'Un patrocinio en Instagram ronda ≈ 100 $ con 1–10 mil seguidores y ≈ 525 $ con 10–50 mil (estimación).', s: 'creat' },
+      { t: 'Cada persona usa ≈ 7,2 redes de media (5,3 en 2025).', s: 'iab' },
+      { t: 'Mecenas: ≈ 3–10 € al mes.', s: 'patreon' },
+    ],
+    trends: [{ t: 'La audiencia está repartida en más plataformas (7,2 de media): publicar en una sola limita tu alcance.', s: 'iab', do: 'Reutiliza el mismo contenido en 2 o 3 plataformas.' }],
+    wins: [{ t: 'Elegir un nicho con mejor pago por vistas (finanzas, tecnología) o vender algo propio.', s: 'creat' }, { t: 'Diversificar: anuncios + patrocinios + comunidad de pago.', s: 'patreon' }],
+    traps: [{ t: 'Vivir solo de anuncios en nichos de pago bajo (≈ 2–4 $ por mil vistas en comida o entretenimiento).', s: 'creat' }],
+    kpis: ['Ingresos por cada 1.000 vistas', 'Participación ≥ 2 %', '% de ingresos que no son anuncios', 'Crecimiento de lista de email'],
+    levers: { ads: ['Monetiza fuera de la plataforma: lista de email y producto propio.'] },
+  },
+  colab: {
+    n: 'Economía colaborativa y marketplaces', head: 'En marketplaces, sin liquidez no hay negocio: empieza en un nicho.',
+    key: [
+      { tg: 'price', t: 'Comisión habitual: entre el 5 y el 30 % del volumen de ventas.', s: 'lowc' },
+      { tg: 'costs,ads', id: 'ltvcac', t: 'Valor del cliente frente a su coste: sano entre 3× y 5×; por debajo de 3× no es viable.', s: 'lowc', cmp: { lo: 2, mid: 3, hi: 5 } },
+      { tg: 'ads,chan', t: 'Coste de captar un comprador: 5–50 $ en consumo masivo y 200–2.000 $ en B2B o servicios de alto valor.', s: 'lowc' },
+      { tg: 'costs', id: 'margin', t: 'Margen de contribución de un marketplace maduro: 60–80 %.', s: 'lowc', cmp: { lo: 55, mid: 65, hi: 80 } },
+      { t: 'Señales de alarma: recompra por debajo del 30 % y menos del 15–20 % de la oferta que acaba vendiendo.', s: 'lowc' },
+    ],
+    trends: [{ t: 'Cuando hay subsidios, el margen puede ser negativo durante 12–36 meses.', s: 'lowc', do: 'Planifica la caja para ese periodo o empieza en un solo nicho.' }],
+    wins: [{ t: 'Un solo nicho y una sola ciudad: concentra la oferta y la demanda para lograr liquidez.', s: 'lowc' }, { t: 'Subir 1–2 puntos de comisión sin perder vendedores, cuando ya aportas valor.', s: 'lowc' }],
+    traps: [{ t: 'Captar los dos lados a la vez sin liquidez: se pierde dinero en cada lado.', s: 'lowc' }, { t: 'Depender de pocos vendedores: si el 10 % mueve más del 50 % de las ventas, hay riesgo.', s: 'lowc' }],
+    kpis: ['Liquidez (oferta que vende) ≥ 20 %', 'Recompra ≥ 30 %', 'LTV/CAC ≥ 3×', 'Concentración de vendedores'],
+    levers: { ltvcac: ['Mejora la recompra: recordatorios, favoritos y programa de fidelidad.', 'Capta la oferta por contacto directo en un nicho.'] },
+  },
+  local: {
+    n: 'Negocio local o empresa', head: 'En negocio local, el margen se juega en la materia prima y el personal.',
+    key: [
+      { tg: 'price,costs', t: 'Restaurantes en España: margen neto ≈ 5–15 % (tradicional 5–10 %, comida rápida 8–12 %, cafetería o bar 10–15 %).', s: 'skello' },
+      { tg: 'costs', t: 'Materia prima ≈ 25–32 % de las ventas y personal ≈ 35–40 % en un restaurante tradicional. Más del 60 % entre ambos pone el negocio en riesgo.', s: 'skello' },
+      { t: 'Suele tardar entre 18 y 36 meses en ser rentable.', s: 'skello' },
+      { t: 'El comercio perdió empresas en 2023 (nacimientos 7,6 % frente a muertes 8,4 %); el resto de servicios ganó (9,9 % frente a 7,9 %).', s: 'ine' },
+    ],
+    trends: [{ t: 'Los servicios crecen en número de empresas (+2,1 % neto) y el comercio retrocede (−0,8 %).', s: 'ine', do: 'Diferénciate por servicio o experiencia, no solo por producto.' }],
+    wins: [{ t: 'Controlar el coste de materia prima y personal: entre ambos no deben pasar del 60 % de las ventas.', s: 'skello' }],
+    traps: [{ t: 'Calcular la rentabilidad sin contar 18–36 meses de arranque.', s: 'skello' }],
+    kpis: ['Materia prima + personal ≤ 60 %', 'Ticket medio', 'Ocupación', 'Clientes recurrentes'],
+    levers: {},
+  },
+  pers: {
+    n: 'Proyecto personal', head: 'Un proyecto personal rara vez vive de donaciones: prueba una versión de pago.',
+    key: [{ t: 'Los mecenas suelen aportar entre 3 y 10 € al mes.', s: 'patreon' }],
+    trends: [], wins: [{ t: 'Una versión de pago o patrocinio claro supera a las donaciones puntuales.', s: 'patreon' }], traps: [], kpis: ['Usuarios activos', '% que paga', 'Ingreso por usuario'], levers: {},
+  },
+};
+
+// ---------- utilidades ----------
+const J = function () { return Array.prototype.filter.call(arguments, Boolean).join('\n\n'); };
+const B = (a) => a.map((x) => '- ' + x).join('\n');
+const nf = (v, d) => (d == null ? Math.round(v * 10) / 10 : Number(v).toFixed(d)).toString().replace('.', ',');
+const FAM = { saas: 'saas', shop: 'shop', serv: 'serv', info: 'info', trade: 'trade', crea: 'crea', colab: 'colab', local: 'local', pers: 'pers' };
+function family(id) { return FAM[id] || 'gen'; }
+const bm = (fam) => BM[family(fam)] || null;
+const label = (fam) => (bm(fam) ? bm(fam).n : GEN.n);
+const src = (id) => SRC[id] || null;
+const tagOf = (id) => { const s = SRC[id]; return s ? s.tag : id; };
+const srcLine = (ids) => { const u = []; (ids || []).forEach((x) => { if (x && u.indexOf(x) < 0) u.push(x); }); return u.length ? 'Fuentes: ' + u.map(tagOf).join(' · ') + '.' : ''; };
+const it = (x) => x.t + ' (' + tagOf(x.s) + ')';
+
+// ---------- origen de datos propio (opcional): cifras al día de tu servidor, mezcladas encima de las de referencia ----------
+let provider = null; const LIVE = {};
+/** fn(fam, seg) → Promise<{ asOf, key:[{ t, s?, src? }], trends:[…] }>. Las entradas se muestran primero y con la fecha de actualización. */
+function setProvider(fn) { provider = typeof fn === 'function' ? fn : null; Object.keys(LIVE).forEach((k) => delete LIVE[k]); }
+function refresh(fam, seg) {
+  const f = family(fam); if (!provider) return Promise.resolve(null);
+  return Promise.resolve().then(() => provider(f, seg || '')).then((o) => { if (o && Array.isArray(o.key)) { LIVE[f] = { asOf: String(o.asOf || ''), key: o.key.filter((x) => x && x.t).slice(0, 6), trends: (o.trends || []).filter((x) => x && x.t).slice(0, 3), sources: o.sources || {} }; return LIVE[f]; } return null; }).catch(() => null);
+}
+const live = (fam) => LIVE[family(fam)] || null;
+const liveTag = (x, L) => x.t + ' (' + (x.src || 'tu origen de datos') + (L.asOf ? ', ' + L.asOf : '') + ')';
+
+// ---------- segmento: venta a empresas o a personas ----------
+const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+function segment(text) {
+  const n = norm(text); if (!n.trim()) return '';
+  const b = (n.match(/\b(b2b|empresas?|pymes?|autonomos?|negocios?|equipos?|clinicas?|restaurantes?|comercios?|tiendas?|profesionales|gestorias?|agencias?|despachos?|corporativ\w+|departamentos?|proveedores?)\b/g) || []).length;
+  const c = (n.match(/\b(b2c|particulares|consumidor\w*|familias?|padres|estudiantes|jovenes|personas|usuarios|clientes finales|mascotas|aficionados)\b/g) || []).length;
+  return b > c ? 'b2b' : c > b ? 'b2c' : '';
+}
+const b2bOn = (fam, seg) => seg === 'b2b' && ['saas', 'serv', 'colab', 'gen'].indexOf(family(fam)) >= 0;
+
+// ---------- consultas de referencia ----------
+function head(fam) { const m = bm(fam); return m ? m.head : GEN.head; }
+function pick(a, n) { return (a || []).slice(0, n); }
+/** Radar del sector: conclusión + 4 cifras con su fuente + siguiente paso. */
+function radar(fam, seg, o) {
+  o = o || {}; const m = bm(fam), L = live(fam); const f = family(fam);
+  const items = []; let ids = [];
+  if (L) L.key.slice(0, 2).forEach((x) => { items.push(liveTag(x, L)); });
+  const base = m ? m.key : GEN.key; // las claves van ordenadas por importancia; las comparables con tu análisis, primero
+  const want = Math.max(2, 3 - items.length - (b2bOn(fam, seg) ? 1 : 0));
+  base.slice(0, want).forEach((x) => { items.push(it(x)); ids.push(x.s); });
+  if (b2bOn(fam, seg)) { items.push(it(B2B.key[0])); ids.push(B2B.key[0].s); }
+  const next = o.next || (o.has ? 'Siguiente paso: pulsa «Compara mis cifras» y vemos dónde estás.' : 'Siguiente paso: analiza tu idea en **Compite** y comparo tus cifras con estas.');
+  return { head: '**' + head(fam) + '**', items: items, ids: ids, label: label(fam), t: J('## Radar · ' + label(fam), '**' + head(fam) + '**', B(items), 'Referencias a ' + ASOF + ' (no en tiempo real).', '**' + next.replace(/^Siguiente paso:\s*/, 'Siguiente paso:** ')) };
+}
+function trends(fam, seg) {
+  const m = bm(fam) || GEN; const L = live(fam); const out = []; const ids = [];
+  if (L) L.trends.slice(0, 2).forEach((x) => out.push(liveTag(x, L)));
+  pick(m.trends, 3).forEach((x) => { out.push(it(x) + (x.do ? ' **→ ' + x.do + '**' : '')); ids.push(x.s); });
+  if (b2bOn(fam, seg)) B2B.trends.forEach((x) => { if (out.length < 4) { out.push(it(x)); ids.push(x.s); } });
+  if (!out.length) GEN.trends.forEach((x) => { out.push(it(x)); ids.push(x.s); });
+  return { items: out.slice(0, 4), ids: ids, label: label(fam), t: J('## Tendencias · ' + label(fam), '**' + (out.length ? 'Esto se mueve ahora en tu sector.' : 'Sin tendencias propias para este modelo.') + '**', B(out.slice(0, 4)), 'Cifras de referencia a ' + ASOF + '.') };
+}
+function wins(fam) {
+  const m = bm(fam) || GEN; const list = pick(m.wins, 3); const ids = list.map((x) => x.s);
+  const items = list.map(it);
+  return { items: items, ids: ids, label: label(fam), t: J('## Lo que hacen los que ganan · ' + label(fam), '**Tres patrones con datos detrás.**', B(items), 'Son patrones que salen de las cifras de referencia, no garantías.') };
+}
+function traps(fam) {
+  const m = bm(fam) || GEN; const list = pick(m.traps, 3).concat(m === GEN ? [] : pick(GEN.traps, 1)); const ids = list.map((x) => x.s);
+  const items = list.map(it);
+  return { items: items, ids: ids, label: label(fam), t: J('## Dónde suele fallar · ' + label(fam), '**Evita estos errores típicos.**', B(items), 'Cifras de referencia a ' + ASOF + '.') };
+}
+function kpis(fam, seg) {
+  const m = bm(fam) || GEN; const list = (m.kpis || GEN.kpis).slice(0, 5);
+  if (b2bOn(fam, seg)) list.push('Visitas que dejan sus datos 1,5–5 %');
+  return { items: list, ids: [], label: label(fam), t: J('## Tus métricas clave · ' + label(fam), '**Mide estas ' + list.length + ' y ordenas el negocio.**', B(list), 'Son metas de referencia (' + ASOF + '): afínalas con tus propios datos en **Valida**.') };
+}
+
+// ---------- comparación con TU análisis ----------
+/**
+ * D = datos del informe de Compite (agent_explain.build). Devuelve filas { id, n, mine, ref, st: ok|warn|bad, why, lever }.
+ * Las cifras tuyas son las ESTIMACIONES del análisis (no resultados medidos): se dice así en el texto.
+ */
+function compare(D, fam, seg) {
+  if (!D || !D.econ) return null;
+  const f = family(fam), m = bm(f), e = D.econ, rows = [];
+  const lev = (id) => ((m && m.levers && m.levers[id]) || (GEN.levers[id]) || []);
+  const cmpOf = (id) => { const k = m && m.key.find((x) => x.id === id && x.cmp); return k ? k : null; };
+  // 1 · valor del cliente frente a su coste (LTV/CAC)
+  if (e.cac > 0 && e.ltv > 0) {
+    const mine = e.ltv / e.cac, k = cmpOf('ltvcac'); const goal = 3;
+    const st = mine >= goal ? 'ok' : mine >= 2 ? 'warn' : 'bad';
+    const refTxt = f === 'saas' ? '≥ 3× (pymes ≈ 2,8×)' : f === 'shop' ? '≥ 3× (belleza ≈ 3,8×, moda ≈ 2,8×)' : f === 'colab' ? '≥ 3× (sano 3–5×)' : '≥ 3×';
+    rows.push({ id: 'ltvcac', n: 'Valor del cliente / coste de captarlo', mine: nf(mine, 1) + '×', ref: 'referencia ' + refTxt, st: st, gap: Math.max(0, 1 - mine / goal), src: k ? k.s : 'bmk', lever: lev('ltvcac') });
+  }
+  // 2 · plazo para recuperar el coste de captar (meses)
+  if (e.cac > 0 && e.unit > 0 && ['shop', 'local', 'trade', 'crea', 'pers'].indexOf(f) < 0) {
+    const mine = e.cac / e.unit, k = cmpOf('payback');
+    const st = mine <= 12 ? 'ok' : mine <= 18 ? 'warn' : 'bad';
+    rows.push({ id: 'payback', n: 'Plazo para recuperar el coste de captar', mine: nf(mine, 0) + ' meses', ref: 'referencia ≤ 12 meses' + (f === 'saas' ? ' (pymes ≈ 11)' : ''), st: st, gap: Math.max(0, mine / 12 - 1), src: k ? k.s : 'bmk', lever: lev('payback') });
+  }
+  // 3 · margen
+  if (e.mg > 0 && m) {
+    const k = cmpOf('margin');
+    if (k) {
+      const mine = e.mg * 100, lo = k.cmp.lo, mid = k.cmp.mid; const st = mine >= lo ? 'ok' : mine >= lo - 12 ? 'warn' : 'bad';
+      rows.push({ id: 'margin', n: 'Margen', mine: nf(mine, 0) + ' %', ref: 'referencia ≈ ' + nf(mid, 0) + ' % (mín. ≈ ' + nf(lo, 0) + ' %)', st: st, gap: Math.max(0, 1 - mine / mid), src: k.s, lever: lev('margin') });
+    }
+  }
+  // 4 · captar solo con anuncios frente al máximo sano
+  if (D.ads && D.ads.cacAds > 0 && D.ads.maxCac > 0) {
+    const r = D.ads.cacAds / D.ads.maxCac; const st = r <= 1 ? 'ok' : r <= 2 ? 'warn' : 'bad';
+    rows.push({ id: 'ads', n: 'Captar solo con anuncios', mine: '≈ ' + D.F.eur(D.ads.cacAds), ref: 'máximo sano ≈ ' + D.F.eur(D.ads.maxCac), st: st, gap: Math.max(0, r - 1) / 4, src: 'bmk', lever: lev('ads') });
+  }
+  // 5 · clientes que alcanzas frente a los que necesitas
+  if (e.be > 0 && e.reach >= 0) {
+    const r = e.reach / e.be; const st = r >= 1.5 ? 'ok' : r >= 1 ? 'warn' : 'bad';
+    rows.push({ id: 'reach', n: 'Clientes que alcanzas / necesitas', mine: '≈ ' + e.reach + ' / ' + e.be, ref: 'conviene holgura ≥ 1,5×', st: st, gap: Math.max(0, 1.5 - r) / 1.5, src: null, lever: lev('reach') });
+  }
+  const ord = { bad: 0, warn: 1, ok: 2 };
+  const sorted = rows.slice().sort((a, b) => ord[a.st] - ord[b.st] || b.gap - a.gap);
+  const bad = rows.filter((r) => r.st === 'bad').length, warn = rows.filter((r) => r.st === 'warn').length;
+  return { rows: rows, sorted: sorted, top: sorted[0] && sorted[0].st !== 'ok' ? sorted[0] : null, bad: bad, warn: warn, ok: rows.length - bad - warn, label: label(f) };
+}
+const STL = { ok: 'Bien', warn: 'Ajusta', bad: 'Frena' };
+// siguiente paso por brecha: una acción pequeña y medible, distinta de la palanca
+const NEXT = {
+  ltvcac: 'Siguiente paso: en el simulador de **Precio, público y posicionamiento** prueba un plan anual y mira cuánto sube tu LTV/CAC.',
+  payback: 'Siguiente paso: pide una señal o pago adelantado a 5 clientes en **Valida** y mide si aceptan.',
+  margin: 'Siguiente paso: revisa tus costes variables en el simulador de **Precio, público y posicionamiento**.',
+  ads: 'Siguiente paso: reparte 100–200 € entre 3 canales y apunta el coste real por cliente.',
+  reach: 'Siguiente paso: consigue 10 pagos reales en **Valida** antes de ampliar el presupuesto.',
+};
+function rowLine(r) { return '**' + STL[r.st] + ' · ' + r.n + ':** ' + r.mine + ' · ' + r.ref; }
+
+/** «Cómo voy frente al mercado»: lectura de cada cifra tuya contra la referencia, y una sola palanca principal. */
+function versus(D, fam, seg) {
+  const C = compare(D, fam, seg); if (!C || !C.rows.length) return null;
+  const lines = C.sorted.slice(0, 4).map(rowLine);
+  const concl = C.bad ? 'Hay ' + (C.bad === 1 ? 'una cifra' : C.bad + ' cifras') + ' por debajo de lo habitual en ' + lcFirst(C.label) + '.' : C.warn ? 'Vas cerca de lo habitual; ajusta ' + (C.warn === 1 ? 'una cifra' : C.warn + ' cifras') + '.' : 'Tus cifras están en línea con lo habitual de tu sector.';
+  const top = C.top; const lever = top && top.lever && top.lever[0] ? top.lever[0] : '';
+  const ids = C.sorted.slice(0, 4).map((r) => r.src).filter(Boolean);
+  const next = top ? (NEXT[top.id] || 'Siguiente paso: ' + lever) : 'Siguiente paso: valida con clientes reales en **Valida**; estas cifras son estimaciones.';
+  return { C: C, ids: ids, t: J('## Tú frente al mercado', '**' + concl + '**', B(lines), 'Tus cifras son las **estimaciones** de tu análisis, no resultados medidos.', '**' + next.replace(/^Siguiente paso:\s*/, 'Siguiente paso:** ')) };
+}
+const lcFirst = (s) => { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); };
+
+/** Diagnóstico estratégico en 2 mensajes: dónde estás, qué palancas mover (con datos) y qué vigilar. */
+function advise(D, fam, seg) {
+  const C = compare(D, fam, seg); const f = family(fam), m = bm(f) || GEN;
+  const bad = C ? C.sorted.filter((r) => r.st !== 'ok') : [];
+  const levers = [];
+  bad.slice(0, 3).forEach((r) => { if (r.lever && r.lever[0]) levers.push('**' + r.n + '.** ' + r.lever[0]); });
+  if (levers.length < 3) { const w = (m.wins || GEN.wins)[0]; if (w) levers.push('**Imita lo que funciona.** ' + w.t); }
+  if (levers.length < 3 && b2bOn(fam, seg)) levers.push('**Embudo B2B.** ' + B2B.levers.conv[1]);
+  const trap = (m.traps && m.traps[0]) || GEN.traps[0];
+  const trend = (m.trends && m.trends[0]) || null;
+  const concl = !C || !C.rows.length ? head(f) : C.bad ? 'Tu idea tiene base, pero ' + (C.bad === 1 ? 'una cifra pide' : C.bad + ' cifras piden') + ' ajuste antes de gastar.' : C.warn ? 'Vas por buen camino: afina ' + (C.warn === 1 ? 'una cifra' : C.warn + ' cifras') + ' y valida.' : 'Tus cifras acompañan: ahora toca validarlas con clientes reales.';
+  const ids = [].concat(C ? C.sorted.slice(0, 3).map((r) => r.src).filter(Boolean) : [], trap.s ? [trap.s] : [], trend ? [trend.s] : []);
+  const m1 = { t: J('## Diagnóstico · ' + label(f), '**' + concl + '**', C && C.rows.length ? B(C.sorted.slice(0, 3).map(rowLine)) : B(pick(m.key, 3).map(it)), trend ? '**Tendencia:** ' + it(trend) : '') };
+  const next = bad[0] ? (NEXT[bad[0].id] || 'Siguiente paso: ajusta tu ' + lcFirst(bad[0].n) + '.') : 'Siguiente paso: lanza una prueba con clientes reales en **Valida** esta semana.';
+  const m2 = { t: J('## Qué haría yo', B(levers.slice(0, 3)), '**Evita:** ' + it(trap), '**' + next.replace(/^Siguiente paso:\s*/, 'Siguiente paso:** ')) };
+  return { seq: [m1, m2], ids: ids, C: C };
+}
+
+/** Una frase proactiva sobre la brecha más importante (o null). q: pregunta para el botón. */
+function nudge(D, fam, seg) {
+  const C = compare(D, fam, seg); if (!C || !C.top) return null;
+  const r = C.top;
+  const t = r.id === 'ltvcac' ? 'Tu valor del cliente frente a su coste (≈ ' + r.mine + ') queda por debajo del 3× habitual.' : r.id === 'payback' ? 'Recuperarías el coste de captar en ≈ ' + r.mine + ': lo habitual es ≤ 12.' : r.id === 'margin' ? 'Tu margen (≈ ' + r.mine + ') queda por debajo de lo habitual en ' + lcFirst(C.label) + '.' : r.id === 'ads' ? 'Captar solo con anuncios te saldría ≈ ' + r.mine.replace('≈ ', '') + ' por cliente, por encima de tu máximo sano.' : 'Con tu presupuesto no llegas a los clientes que necesitas para cubrir costes.';
+  return { t: t, q: '¿Cómo voy frente al mercado?', id: r.id, st: r.st };
+}
+
+/** Líneas cortas para el servidor de IA (RAG): referencias del sector comparadas con el proyecto. Máximo 8 líneas. */
+function refs(D, fam, seg) {
+  const f = family(fam), m = bm(f), out = [];
+  out.push('Sector de referencia: ' + label(f) + (seg === 'b2b' ? ' · venta a empresas (B2B)' : seg === 'b2c' ? ' · venta a personas (B2C)' : '') + ' · cifras a ' + ASOF);
+  const C = D ? compare(D, f, seg) : null;
+  if (C) C.sorted.slice(0, 4).forEach((r) => out.push((STL[r.st] || '') + ': ' + r.n + ' = ' + r.mine + ' · ' + r.ref + (r.src ? ' (' + tagOf(r.src) + ')' : '')));
+  if (C && C.top && C.top.lever && C.top.lever[0]) out.push('Palanca principal (' + lcFirst(C.top.n) + '): ' + C.top.lever[0]);
+  const k = m ? m.key : GEN.key; k.slice(0, C ? 2 : 4).forEach((x) => out.push(x.t.replace(/\s+/g, ' ') + ' (' + tagOf(x.s) + ')'));
+  return out.slice(0, 8).map((x) => x.slice(0, 300));
+}
+
+/** Fuentes citadas, con enlace: [{ tag, n, d, u, sec, c }] */
+function sources(ids) { const u = []; (ids || []).forEach((x) => { if (x && SRC[x] && u.indexOf(x) < 0) u.push(x); }); return u.map((x) => Object.assign({ id: x }, SRC[x])); }
+/** Texto con los enlaces de las fuentes: [Nombre](url) · fecha · tipo. */
+function sourcesText(ids) {
+  const s = sources(ids); if (!s.length) return '';
+  return J('## De dónde salen estos datos', B(s.map((x) => '[' + x.n + '](' + x.u + ') · ' + x.d + ' · ' + CONF[x.c || 2])), 'Cifras de referencia consultadas en ' + ASOF + ': no son un flujo en tiempo real. Las fuentes secundarias conviene contrastarlas con la original antes de decidir.');
+}
+/** Respuesta a «¿son datos en tiempo real?». */
+function honesty(fam) {
+  const L = live(fam);
+  return J('**No son en tiempo real:** son cifras de referencia recogidas en ' + ASOF + ', cada una con su fuente y su fecha.', B(['Las oficiales (CNMC, INE, Baymard) se publican en bloques; las privadas, una o dos veces al año.', 'Las fuentes secundarias van marcadas: contrástalas antes de decidir.', L ? 'Tienes un origen de datos propio conectado: sus cifras salen primero (' + (L.asOf || 'sin fecha') + ').' : 'Si conectas tu propio origen de datos, sus cifras salen primero y con su fecha.']), 'Mis recomendaciones son orientación, no asesoramiento financiero ni legal.');
+}
+
+/** Una cifra de referencia (con su fuente) relevante para un tema: price, ads, costs, chan o land. '' si no hay. */
+function line(fam, topic) {
+  const m = bm(fam); if (!m) return '';
+  const x = m.key.find((k) => k.tg && k.tg.split(',').indexOf(topic) >= 0);
+  return x ? it(x) : '';
+}
+/** Ids de todas las fuentes de un modelo (para «Ver fuentes»). */
+function idsFor(fam) { const m = bm(fam) || GEN; const a = []; ['key', 'trends', 'wins', 'traps'].forEach((k) => (m[k] || []).forEach((x) => { if (x.s && a.indexOf(x.s) < 0) a.push(x.s); })); (GEN.key || []).forEach((x) => { if (a.indexOf(x.s) < 0) a.push(x.s); }); return a; }
+
+const API = { ASOF: ASOF, line: line, idsFor: idsFor, SRC: SRC, BM: BM, GEN: GEN, B2B: B2B, family: family, label: label, segment: segment, radar: radar, trends: trends, wins: wins, traps: traps, kpis: kpis, compare: compare, versus: versus, advise: advise, nudge: nudge, refs: refs, sources: sources, sourcesText: sourcesText, srcLine: srcLine, honesty: honesty, setProvider: setProvider, refresh: refresh, live: live };
+if (typeof module !== 'undefined' && module.exports) module.exports = API;
+if (typeof LV !== 'undefined') LV.intel = API;
 })();
 
 /* ============================================================
@@ -9504,7 +12042,7 @@ if (typeof LV !== 'undefined') LV.agentTips = API;
    Asistente ValidLance · explicador de datos de Compite
    Convierte el informe (mercado, competidores, precio, captación, riesgos, plan) en lenguaje llano y personalizado:
    · build(raw, F)     datos del informe → objeto plano D (cifras ya formateadas)
-   · summary(D)        resumen ejecutivo en 3 mensajes (veredicto, qué significan las cifras, qué hacer)
+   · summary(D)        resumen ejecutivo en 2 mensajes (veredicto y cifras; qué significan y qué hacer)
    · topic(id, D)      explicación de una parte: market, comp, price, ads, risks, plan, score, trust, first
    · concept(id, D)    definición de un concepto (TAM, SOM, CAC…) con las cifras del proyecto si existen
    Sin DOM: recibe los datos y los formateadores (money, fn, eur) desde fuera, así que se puede probar con Node.
@@ -9516,6 +12054,7 @@ const KB = (typeof LV !== 'undefined' && LV.agentKB) || (typeof require !== 'und
 const lc = (s) => { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); };
 const cap = (s) => { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); };
 const B = (a) => a.map((x) => '- ' + x).join('\n');
+const first = (t) => String(t || '').split(/(?<=[.!?])\s+/)[0];
 const J = function () { return Array.prototype.filter.call(arguments, Boolean).join('\n\n'); };
 const sum = (a) => a.reduce((s, x) => s + x, 0);
 
@@ -9538,7 +12077,7 @@ function build(raw, F) {
     nC: comps.length, comps: comps.slice(0, 5).map((c) => ({ name: c.name, kind: c.kind, share: c.share })), top3: sum(comps.slice(0, 3).map((c) => c.share)), shareOf: eco.shareOf, rest: eco.rest, gap: eco.gap,
     price: est ? { txt: est.priceTxt, label: est.priceLabel || est.struct, lo: est.band && est.band.lo, hi: est.band && est.band.hi, tier: est.tier || null, struct: est.struct, model: est.model && est.model.n, score: est.score, verdict: est.verdict, be: est.be, pay: est.pay, profit12: est.profit12 } : null,
     ads: { cacAds: Math.round(a.cacAds), cacLo: Math.round(a.cacLo), maxCac: a.maxCac, verdict: a.verdict, cpcG: F.fn(a.cpcG, 2), cpcM: F.fn(a.cpcM, 2), conv: F.fn(a.conv, 1), cpl: F.fn(a.cpl, 1), leadCust: Math.round(a.leadCust) },
-    econ: { be: e.be, reach: e.reach, ratio: e.reachRatio, ltv: e.ltv, cac: e.cac, v: e.v, runway: e.runway },
+    econ: { be: e.be, reach: e.reach, ratio: e.reachRatio, ltv: e.ltv, cac: e.cac, v: e.v, runway: e.runway, mg: e.mg, unit: e.unit, life: e.life },
     risks: M.chain.risks.map((r) => ({ sev: r.sev, title: r.title, text: r.text, fix: r.fix })), strengths: rep.strengths.map((s) => ({ t: s.t, d: s.d })),
     recs: M.chain.recs.map((c) => ({ n: c.n, t: c.t, eff: c.eff, why: c.why, pri: c.pri && c.pri.l })),
     plan: { weeks: M.plan.weeks, ms: M.plan.msCount, phases: (M.plan.phases || []).map((p) => ({ t: p.t, w0: p.w0, w1: p.w1, eur: p.eur })) },
@@ -9547,87 +12086,117 @@ function build(raw, F) {
   return D;
 }
 
-// ---------- piezas de lenguaje llano ----------
+// ---------- voz de ValidLance: titular primero, frases cortas, una sola acción ----------
+// Reglas (ver GUIA_DE_VOZ.md): 1) la primera línea es la conclusión; 2) frases de ~15 palabras; 3) viñetas, no párrafos;
+// 4) un solo «Siguiente paso»; 5) jerga explicada en pocas palabras; 6) cifras siempre etiquetadas (publicada / estimada).
 const eur = (D, v) => D.F.eur(v);
 /** «≈ **3,1 M€**», pero sin «≈» delante de «< 10 mil €». */
 const ap = (x) => (/^</.test(String(x)) ? '**' + x + '**' : '≈ **' + x + '**');
+const pctTxt = (D, v) => D.F.fn(v, v % 1 ? 1 : 0);
+const plural = (n, one, many) => n + ' ' + (n === 1 ? one : many);
+/** Veredicto de una línea según la banda de viabilidad. */
+function verdictLine(D) { return D.band.cls === 'ok' ? 'Hay oportunidad y los números acompañan.' : D.band.cls === 'warn' ? 'Tiene potencial, pero ajústala antes de gastar.' : 'Así no. Replantéala antes de invertir.'; }
+function marketVerdict(D) { return D.tamV >= 2000 ? 'Mercado grande: tu límite es llegar a la gente, no su tamaño.' : D.tamV >= 200 ? 'Mercado medio: hay sitio si eliges bien tu nicho.' : 'Mercado pequeño: necesitas un nicho muy claro.'; }
+function concVerdict(D) { return D.top3 >= 50 ? 'Mercado concentrado: difícil entrar de frente.' : D.top3 >= 25 ? 'Hay líderes, pero queda sitio.' : 'Mercado repartido: no hay un gigante que lo domine.'; }
+function adsVerdict(D) { const v = D.ads.verdict; return v === 'ok' ? 'Los anuncios pueden funcionar.' : v === 'warn' ? 'Va justo: combina anuncios con canales gratuitos.' : 'Solo con anuncios no sale a cuenta.'; }
 function marketText(D) {
-  const big = D.tamV >= 2000 ? 'El mercado es grande: tu límite no es su tamaño, sino cuánta gente consigues alcanzar.' : D.tamV >= 200 ? 'Es un mercado de tamaño medio: hay sitio si eliges bien tu nicho.' : 'Es un mercado pequeño: necesitas un nicho muy claro y no depender de volumen.';
-  const own = D.clients > 0 ? 'Con ' + D.budgetTxt + ' de presupuesto captarías unos **' + D.clients + ' clientes**, ' + ap(D.som) + ' el primer año (SOM).' : 'Aún no has indicado presupuesto, así que no puedo estimar tu SOM: añádelo en la ficha.';
-  return 'En España se gastan ' + ap(D.tam) + ' al año en ' + lc(D.sector) + ' (TAM, ' + (D.tamPub ? 'cifra publicada' : 'estimado') + '). Por tu ámbito (' + lc(D.scope || 'según el sector') + ') y tu nicho, solo podrías atender ' + ap(D.sam) + ' (SAM). ' + own + ' ' + big;
+  const own = D.clients > 0 ? ap(D.som) + ' para ti (SOM, ≈ ' + D.clients + ' clientes)' : 'tu SOM: falta el presupuesto';
+  return ap(D.tam) + ' de mercado total (TAM, ' + (D.tamPub ? 'publicado' : 'estimado') + ') · ' + ap(D.sam) + ' atendibles (SAM) · ' + own + '. ' + marketVerdict(D);
 }
 function compText(D) {
-  if (!D.nC) return 'No hay rivales directos en el mapa de tu sector: es buena señal, pero comprueba que de verdad exista demanda.';
+  if (!D.nC) return 'No hay rivales directos en el mapa. Buena señal, pero comprueba que exista demanda.';
   const r = D.comps[0];
-  const conc = D.top3 >= 50 ? 'Los tres mayores suman ≈ ' + D.F.fn(D.top3, 0) + ' %: **mercado concentrado**, difícil entrar de frente.' : D.top3 >= 25 ? 'Los tres mayores suman ≈ ' + D.F.fn(D.top3, 0) + ' %: hay líderes, pero **queda sitio**.' : 'Los tres mayores suman solo ≈ ' + D.F.fn(D.top3, 0) + ' %: **mercado repartido**, sin un gigante que lo domine.';
-  return 'Hay **' + D.nC + (D.nC === 1 ? ' rival' : ' rivales') + '** en el mapa y el mayor, ' + r.name + ', se lleva ≈ ' + D.F.fn(r.share, r.share % 1 ? 1 : 0) + ' % ' + D.shareOf + '. ' + conc + ' La saturación es ' + lc(D.satL) + ' (' + D.sat + ' %). Tu hueco: precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**.';
+  return '**' + plural(D.nC, 'rival', 'rivales') + '**; el mayor, ' + r.name + ', pesa ≈ ' + pctTxt(D, r.share) + ' %. **' + concVerdict(D) + '** Saturación ' + lc(D.satL) + ' (' + D.sat + ' %). Tu hueco: precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**.';
 }
 function priceText(D) {
-  const p = D.price; if (!p) return 'Todavía no has fijado tu precio: ábrelo en «Precio y público» de Compite y verás si estás por encima o por debajo de lo que cobra el mercado.';
-  return 'Partes de **' + p.txt + '** (' + lc(p.label) + ')' + (p.lo ? ' y el mercado cobra de ' + p.lo + ' a ' + p.hi : '') + '. ' + (p.tier ? '**' + p.tier.l + '**: ' + p.tier.d : '');
+  const p = D.price; if (!p) return 'Aún no has fijado precio. Ábrelo en «Precio y público» y verás cómo te colocas frente al mercado.';
+  return '**' + p.txt + '** (' + lc(p.label) + ')' + (p.lo ? ' frente a ' + p.lo + ' a ' + p.hi + ' del mercado' : '') + (p.tier ? ': **' + lc(p.tier.l) + '**' : '') + '.';
 }
 function adsText(D) {
   const a = D.ads;
-  const v = a.verdict === 'ok' ? 'los anuncios pueden funcionar.' : a.verdict === 'warn' ? 'está justo: combina anuncios con canales gratuitos.' : 'solo con anuncios **no sale a cuenta**: apóyate en comunidad, alianzas y recomendaciones.';
   const lo = a.cacLo < a.cacAds * 0.9 ? ' Con reseñas y clientes que te recomienden bajaría a ≈ ' + eur(D, a.cacLo) + '.' : '';
-  return 'Conseguir un cliente solo con anuncios te costaría ≈ **' + eur(D, a.cacAds) + '** y lo máximo sano son **' + eur(D, a.maxCac) + '** (un tercio de lo que te deja un cliente): ' + v + lo;
+  const todo = a.verdict === 'ok' ? '' : a.verdict === 'warn' ? ' Combina anuncios con canales gratuitos.' : ' Empieza por canales gratuitos: comunidad y alianzas.';
+  return '**' + adsVerdict(D) + '** Un cliente cuesta ≈ **' + eur(D, a.cacAds) + '** (máximo sano: **' + eur(D, a.maxCac) + '**).' + todo + lo;
 }
 function beText(D) {
   const e = D.econ; if (!e.be) return '';
-  const r = e.ratio >= 1.5 ? 'vas con margen' : e.ratio >= 1 ? 'vas justo' : 'no llegarías: ajusta costes, precio o canales';
-  return 'Para cubrir tus costes fijos necesitas ≈ **' + e.be + ' clientes**; con tu presupuesto alcanzarías ≈ **' + e.reach + '**: ' + r + '.';
+  const r = e.ratio >= 1.5 ? 'vas con margen' : e.ratio >= 1 ? 'vas justo' : 'no llegas: ajusta costes, precio o canales';
+  return 'Necesitas ≈ **' + e.be + ' clientes** para cubrir costes fijos. Con tu presupuesto llegas a ≈ **' + e.reach + '**: ' + r + '.';
 }
 function trustText(D) {
-  const n = D.prov.p + D.prov.e;
-  return 'De **' + n + ' cifras**, ' + D.prov.p + (D.prov.p === 1 ? ' es un dato publicado' : ' son datos publicados') + ' y ' + D.prov.e + (D.prov.e === 1 ? ' es una estimación' : ' son estimaciones') + '. Sirven para orientarte, no para prometer resultados: contrástalas con clientes reales en Valida.';
+  const p = D.prov.p, e = D.prov.e;
+  return '**' + plural(p + e, 'cifra', 'cifras') + '**: ' + plural(p, 'publicada', 'publicadas') + ' y ' + plural(e, 'estimada', 'estimadas') + '. Orientan, no prometen. Contrástalas con clientes reales en Valida.';
 }
-function staleNote(D) { return D.stale ? 'Ojo: has cambiado tu idea después de este análisis, así que estas cifras pueden estar desfasadas. Vuelve a analizar para actualizarlas.' : ''; }
-function regNote(D) { return D.regulated ? 'Ojo regulatorio: dar recomendaciones personalizadas de inversión o gestionar dinero de terceros suele exigir autorización de la CNMV. Consúltalo con un profesional.' : ''; }
+function staleNote(D) { return D.stale ? 'Ojo: cambiaste la idea después de este análisis. Vuelve a analizar para actualizar las cifras.' : ''; }
+function regNote(D) { return D.regulated ? 'Ojo, sector regulado: recomendar inversiones o gestionar dinero ajeno suele exigir autorización de la CNMV. Consúltalo con un profesional.' : ''; }
 
 function stats(D) {
   const a = D.ads, r = D.comps[0];
   return [
     { l: 'Mercado total (TAM)', v: D.tam, s: D.tamPub ? 'cifra publicada' : 'estimado' },
     { l: 'Lo que puedes captar (SOM)', v: D.clients > 0 ? D.som : '—', s: D.clients > 0 ? '≈ ' + D.clients + ' clientes' : 'falta presupuesto' },
-    { l: 'Rivales', v: String(D.nC), s: r ? 'el mayor ≈ ' + D.F.fn(r.share, r.share % 1 ? 1 : 0) + ' %' : 'sin rivales directos' },
+    { l: 'Rivales', v: String(D.nC), s: r ? 'el mayor ≈ ' + pctTxt(D, r.share) + ' %' : 'sin rivales directos' },
     { l: 'Un cliente con anuncios', v: '≈ ' + eur(D, a.cacAds), s: 'máx. sano ' + eur(D, a.maxCac) },
   ];
 }
 
 // ---------- resumen ejecutivo ----------
+// Versiones cortas para el resumen: las cifras grandes ya están en las tarjetas, aquí solo lo que significan.
+const cMarket = (D) => marketVerdict(D) + ' Atendible: ' + ap(D.sam) + '.';
+const cComp = (D) => (D.nC ? concVerdict(D) + ' Tu hueco: precio **' + D.gap.pl + '**, personalización **' + D.gap.sl + '**.' : 'Sin rivales directos: buena señal, pero comprueba que haya demanda.');
+const cPrice = (D) => (D.price ? '**' + D.price.txt + '**' + (D.price.lo ? ' frente a ' + D.price.lo + ' a ' + D.price.hi : '') + (D.price.tier ? ': ' + lc(D.price.tier.l) : '') + '.' : '');
+const cAds = (D) => adsVerdict(D) + (D.ads.verdict === 'ok' ? '' : ' Empieza por canales gratuitos.');
+const cBe = (D) => { const e = D.econ; if (!e.be) return ''; return 'Necesitas ≈ **' + e.be + '** clientes; con tu presupuesto llegas a ≈ **' + e.reach + '**: ' + (e.ratio >= 1.5 ? 'vas con margen' : e.ratio >= 1 ? 'vas justo' : 'no llegas, ajusta costes o precio') + '.'; };
+const cTrust = (D) => plural(D.prov.p, 'cifra publicada', 'cifras publicadas') + ' y ' + plural(D.prov.e, 'estimada', 'estimadas') + '. Contrástalas en Valida.';
 function summary(D) {
-  const verdict = D.band.cls === 'ok' ? 'Hay una oportunidad clara y los números acompañan.' : D.band.cls === 'warn' ? 'La idea se sostiene, pero conviene ajustarla antes de gastar dinero.' : 'Tal como está, hay demasiados frenos: conviene replantearla antes de invertir.';
-  const m1 = { t: J('## Tu resumen, en claro', '**' + D.name + '** saca **' + D.viab + ' sobre 100**: ' + lc(D.band.l) + '. ' + verdict, 'No es una predicción: es una orientación basada en datos de mercado y estimaciones. La probabilidad orientativa de éxito sale en **' + D.prob + ' %** y el nivel de riesgo es **' + lc(D.rband.l).replace(/^riesgo /, '') + '**.', staleNote(D)), stats: stats(D) };
-  const pr = D.price ? '**Precio:** ' + priceText(D) : '';
-  const m2 = { t: J('## Qué significan tus cifras', B(['**Mercado:** ' + marketText(D), '**Competencia:** ' + compText(D), pr, '**Captar clientes:** ' + adsText(D), beText(D) && '**Punto de equilibrio:** ' + beText(D), '**Cuánto fiarte:** ' + trustText(D)].filter(Boolean))) };
-  const fav = D.strengths.slice(0, 2).map((s) => s.t);
-  const frn = D.risks.slice(0, 2);
-  const m3 = {
-    t: J('## Qué conclusiones sacar',
-      fav.length ? '**A tu favor:** ' + fav.join(' y ') + '.' : '',
-      frn.length ? '**Lo que más te frena:**\n' + B(frn.map((r) => '**' + r.title + '.** ' + r.fix)) : '',
-      D.recs.length ? '**Haz esto primero:**\n' + B(D.recs.slice(0, 3).map((c) => c.t + ' (' + lc(c.eff) + ')')) : '',
-      'Siguiente paso lógico: contrastarlo con clientes reales en **Valida**, antes de gastar dinero.', regNote(D)),
+  const rk = lc(D.rband.l).replace(/^riesgo /, '');
+  const m1 = { t: J('## ' + D.viab + '/100 · ' + cap(D.band.l), '**' + verdictLine(D) + '**', 'Éxito orientativo ≈ **' + D.prob + ' %** · riesgo **' + rk + '**. Estimado, no una predicción.', staleNote(D)), stats: stats(D) };
+  const frn = D.risks[0];
+  const m2 = {
+    t: J('## Qué significan tus cifras',
+      B(['**Mercado:** ' + cMarket(D), '**Competencia:** ' + cComp(D), D.price ? '**Precio:** ' + cPrice(D) : '', '**Clientes:** ' + cAds(D), cBe(D) && '**Equilibrio:** ' + cBe(D), '**Fiabilidad:** ' + cTrust(D)].filter(Boolean)),
+      frn ? '**Te frena:** ' + frn.title + '. ' + frn.fix : '',
+      D.recs.length ? '**Empieza por:**\n' + B(D.recs.slice(0, 2).map((c) => c.t + ' (' + lc(c.eff) + ')')) : '',
+      '**Siguiente paso:** valida con clientes reales en **Valida** antes de gastar.', regNote(D)),
     acts: [{ l: 'Ver riesgos y estrategia', nav: 'chain' }, { l: 'Ir a Valida', go: 'valida' }],
   };
-  return { seq: [m1, m2, m3], qr: ['Explícame el TAM, SAM y SOM', 'Explícame a mis rivales', '¿Por qué sale ' + D.viab + '?', '¿Qué hago primero?', 'Explícame los riesgos'] };
+  return { seq: [m1, m2], qr: ['Explícame el TAM, SAM y SOM', 'Explícame a mis rivales', '¿Por qué sale ' + D.viab + '?', '¿Qué hago primero?', 'Explícame los riesgos'] };
 }
 
 // ---------- partes sueltas ----------
 function topic(id, D) {
   switch (id) {
-    case 'market': return { t: J('## Mercado: del total a tus clientes', marketText(D), 'Puedes mover el alcance geográfico y la parte del sector que atiendes en la tarjeta **Mercado** de Compite: el SAM y el SOM se recalculan.'), stats: stats(D).slice(0, 2).concat([{ l: 'Mercado atendible (SAM)', v: D.sam, s: D.geo + ' % alcance · ' + D.seg + ' % sector' }]), acts: [{ l: 'Abrir Mercado', nav: 'mkt' }] };
-    case 'comp': return { t: J('## Competencia', compText(D), D.comps.length ? 'Los que más pesan:\n' + B(D.comps.slice(0, 4).map((c) => '**' + c.name + '** (' + lc(c.kind) + '): ≈ ' + D.F.fn(c.share, c.share % 1 ? 1 : 0) + ' %')) : '', 'Lectura: no mires solo **cuántos** son, sino **cuánto pesan** y **dónde flojean**. Ahí está tu hueco.'), acts: [{ l: 'Abrir Competidores', nav: 'eco' }] };
-    case 'price': return { t: J('## Precio', priceText(D), D.price && D.price.be ? 'Con ese precio, según el simulador, recuperarías la inversión en ≈ ' + D.price.pay + ' meses (supuestos tuyos y estimados).' : ''), acts: [{ l: 'Abrir Precio y público', nav: 'est' }] };
-    case 'ads': return { t: J('## Coste de captar clientes', adsText(D), 'Estos costes son **estimaciones** a partir de referencias internacionales ajustadas a España. Mide tu cifra real con una landing en Valida.'), acts: [{ l: 'Abrir Mercado', nav: 'mkt' }, { l: 'Ir a Valida', go: 'valida' }] };
-    case 'risks': return { t: J('## Riesgos, en claro', D.risks.length ? B(D.risks.slice(0, 4).map((r) => '**' + r.title + '** (' + ['', 'gravedad baja', 'gravedad media', 'gravedad alta'][r.sev || 1] + '): ' + r.text + ' **Qué hacer:** ' + lc(r.fix))) : 'No hay riesgos destacados en este análisis.', 'Empieza por el que más afecte a tu primer cliente.', regNote(D)), acts: [{ l: 'Abrir Riesgos y estrategia', nav: 'chain' }] };
-    case 'plan': return { t: J('## Plan de acción', 'El plan dura ≈ **' + D.plan.weeks + ' semanas** y tiene **' + D.plan.ms + ' hitos**.', D.plan.phases.length ? B(D.plan.phases.slice(0, 6).map((p) => '**' + p.t + '** (semanas ' + p.w0 + ' a ' + p.w1 + ', ≈ ' + eur(D, p.eur) + ')')) : '', 'Marca cada hito al completarlo y empieza por la primera fase aunque la idea no esté perfecta.'), acts: [{ l: 'Abrir el plan', nav: 'plan' }] };
+    case 'market': return { t: J('## Mercado', '**' + marketVerdict(D) + '**', B([
+      'Total (TAM): ' + ap(D.tam) + ' al año en ' + lc(D.sector) + ' · ' + (D.tamPub ? 'publicado' : 'estimado'),
+      'Atendible (SAM): ' + ap(D.sam) + ' · por tu ámbito (' + lc(D.scope || 'según el sector') + ') y tu nicho',
+      D.clients > 0 ? 'Tu parte (SOM): ' + ap(D.som) + ' · ≈ ' + D.clients + ' clientes con ' + D.budgetTxt : 'Tu parte (SOM): falta el presupuesto en la ficha',
+    ]), 'Mueve el alcance y el sector en la tarjeta **Mercado** de Compite y todo se recalcula.'), stats: stats(D).slice(0, 2).concat([{ l: 'Mercado atendible (SAM)', v: D.sam, s: D.geo + ' % alcance · ' + D.seg + ' % sector' }]), acts: [{ l: 'Abrir Mercado', nav: 'mkt' }] };
+    case 'comp': return { t: J('## Competencia', D.nC ? '**' + concVerdict(D) + '**' : '**Sin rivales directos en el mapa.**', D.nC ? B([
+      plural(D.nC, 'rival', 'rivales') + ' en el mapa; el mayor, ' + D.comps[0].name + ', pesa ≈ ' + pctTxt(D, D.comps[0].share) + ' %',
+      'Los 3 mayores suman ≈ ' + D.F.fn(D.top3, 0) + ' %',
+      'Saturación: ' + lc(D.satL) + ' (' + D.sat + ' %)',
+      'Tu hueco: precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**',
+    ]) : 'Buena señal, pero comprueba que exista demanda.', D.comps.length ? '**Los que más pesan:**\n' + B(D.comps.slice(0, 4).map((c) => '**' + c.name + '** (' + lc(c.kind) + '): ≈ ' + pctTxt(D, c.share) + ' %')) : '', 'Mira cuánto pesan y dónde flojean, no solo cuántos son. Ahí está tu hueco.'), acts: [{ l: 'Abrir Competidores', nav: 'eco' }] };
+    case 'price': return { t: J('## Precio', D.price ? B([
+      'Tu precio: **' + D.price.txt + '** (' + lc(D.price.label) + ')',
+      D.price.lo ? 'El mercado cobra: ' + D.price.lo + ' a ' + D.price.hi : '',
+      D.price.tier ? '**' + D.price.tier.l + '.** ' + D.price.tier.d : '',
+      D.price.be ? 'Recuperas la inversión en ≈ **' + D.price.pay + ' meses** (con tus supuestos, estimado)' : '',
+    ].filter(Boolean)) : priceText(D)), acts: [{ l: 'Abrir Precio y público', nav: 'est' }] };
+    case 'ads': return { t: J('## Coste de captar clientes', '**' + adsVerdict(D) + '**', B([
+      'Un cliente con anuncios: ≈ **' + eur(D, D.ads.cacAds) + '**',
+      'Máximo sano: **' + eur(D, D.ads.maxCac) + '** (un tercio de lo que te deja un cliente)',
+      D.ads.cacLo < D.ads.cacAds * 0.9 ? 'Con reseñas y recomendaciones bajaría a ≈ **' + eur(D, D.ads.cacLo) + '**' : '',
+      D.ads.verdict === 'ok' ? '' : 'Prueba antes: comunidad, alianzas y recomendaciones',
+    ].filter(Boolean)), 'Son **estimaciones** con referencias internacionales ajustadas a España. Tu cifra real la mides con una landing en Valida.'), acts: [{ l: 'Abrir Mercado', nav: 'mkt' }, { l: 'Ir a Valida', go: 'valida' }] };
+    case 'risks': return { t: J('## Riesgos', D.risks.length ? '**Tu mayor freno: ' + D.risks[0].title + '.**' : '**No hay riesgos destacados en este análisis.**', D.risks.length ? B(D.risks.slice(0, 4).map((r) => '**' + r.title + '** (' + ['', 'gravedad baja', 'gravedad media', 'gravedad alta'][r.sev || 1] + '). ' + first(r.text) + ' **Qué hacer:** ' + lc(r.fix))) : '', D.risks.length ? '**Siguiente paso:** empieza por el que más afecte a tu primer cliente.' : '', regNote(D)), acts: [{ l: 'Abrir Riesgos y estrategia', nav: 'chain' }] };
+    case 'plan': return { t: J('## Plan de acción', '**≈ ' + D.plan.weeks + ' semanas · ' + D.plan.ms + ' hitos.**', D.plan.phases.length ? B(D.plan.phases.slice(0, 6).map((p) => '**' + p.t + '** · semanas ' + p.w0 + ' a ' + p.w1 + ' · ≈ ' + eur(D, p.eur))) : '', '**Siguiente paso:** empieza ya por la fase 1. No esperes a que la idea esté perfecta.'), acts: [{ l: 'Abrir el plan', nav: 'plan' }] };
     case 'score': {
       const f = D.F6;
-      return { t: J('## Por qué sale ' + D.viab, '**' + D.name + '** saca **' + D.viab + '/100** (' + lc(D.band.l) + '). Es la media de seis factores, de 0 a 100:', B(f.map((x, i) => x.l + ': **' + x.v + '**' + (i === 0 ? ' · tu mejor baza' : i === f.length - 1 ? ' · lo que más tira hacia abajo' : ''))), D.props.length ? 'Lo que más puede subirla: **' + D.props[0].title + '** (≈ +' + D.props[0].gain + ' puntos si la aplicas en Compite).' : '') , acts: [{ l: 'Ver propuestas', nav: 'chain' }] };
+      return { t: J('## Por qué sale ' + D.viab, '**' + D.viab + '/100: ' + lc(D.band.l) + '.** Es la media de 6 factores (de 0 a 100):', B(f.map((x, i) => x.l + ': **' + x.v + '**' + (i === 0 ? ' · tu mejor baza' : i === f.length - 1 ? ' · lo que más te baja' : ''))), D.props.length ? '**Lo que más la sube:** ' + D.props[0].title + ' (≈ +' + D.props[0].gain + ' puntos si la aplicas en Compite).' : '') , acts: [{ l: 'Ver propuestas', nav: 'chain' }] };
     }
-    case 'trust': return { t: J('## Cuánto fiarte de estas cifras', trustText(D), 'Cada cifra de Compite lleva su etiqueta —publicada, estimada o tuya— y su fuente en la tarjeta **Fuentes**.'), acts: [{ l: 'Abrir Fuentes', nav: 'src' }] };
-    case 'first': return { t: J('## Qué hacer primero', D.recs.length ? B(D.recs.slice(0, 3).map((c) => '**' + c.t + '** (' + lc(c.eff) + '). ' + c.why)) : 'No hay recomendaciones en este análisis.', 'Siguiente paso lógico: contrastarlo con clientes reales en Valida.'), acts: [{ l: 'Ir a Valida', go: 'valida' }, { l: 'Abrir el plan', nav: 'plan' }] };
+    case 'trust': return { t: J('## Cuánto fiarte de las cifras', trustText(D), 'Cada cifra lleva su etiqueta (publicada, estimada o tuya) y su fuente en la tarjeta **Fuentes**.'), acts: [{ l: 'Abrir Fuentes', nav: 'src' }] };
+    case 'first': return { t: J('## Qué hacer primero', D.recs.length ? B(D.recs.slice(0, 3).map((c) => '**' + c.t + '** (' + lc(c.eff) + '). ' + c.why)) : 'No hay recomendaciones en este análisis.', '**Siguiente paso:** contrástalo con clientes reales en Valida.'), acts: [{ l: 'Ir a Valida', go: 'valida' }, { l: 'Abrir el plan', nav: 'plan' }] };
     default: return null;
   }
 }
@@ -9659,8 +12228,8 @@ function personal(id, D) {
 }
 function concept(id, D) {
   const g = KB && KB.GLOSS[id]; if (!g) return null;
-  const p = personal(id, D);
-  return { t: J('**' + g.n + '**', g.d, '**Cómo se calcula o se lee:** ' + g.c, p || (D ? '' : 'Cuando generes tu análisis en Compite te lo explico con las cifras de tu proyecto.'), '**Qué hacer con ello:** ' + g.tip) };
+  const p = personal(id, D).replace(/^En tu caso: /, '');
+  return { t: J('**' + g.n + '**', g.d, B(['**Cómo se lee:** ' + g.c, '**En tu caso:** ' + (p || 'genera tu análisis en Compite y te lo calculo con tus cifras.'), '**Qué hacer:** ' + g.tip])) };
 }
 
 // ---------- consultoría sobre una idea escrita en el chat ----------
@@ -9668,26 +12237,25 @@ function concept(id, D) {
  *  D = build(...), det = lectura del texto (intake.parse), o = { model: {name, alt, earn, risk}, gate: bool } */
 function priceAdvice(D, given) {
   const p = D.price;
-  if (!p) return 'Fija un **precio de partida** y prueba dos versiones en tu landing: quédate con la que más gente pague, no con la que más guste.';
-  const lead = given.price ? 'Con **' + p.txt + '**' + (p.lo ? ' (el mercado cobra de ' + p.lo + ' a ' + p.hi + ')' : '') + ': ' : 'Como no has dicho precio, parto de **' + p.txt + '** (orientativo)' + (p.lo ? ' y el mercado cobra de ' + p.lo + ' a ' + p.hi : '') + '. ';
-  const tier = p.tier ? '**' + p.tier.l + '**. ' + p.tier.d + ' ' : '';
-  const pay = p.pay ? 'Recuperarías la inversión en ≈ ' + p.pay + ' meses (estimado). ' : '';
-  return lead + tier + pay + 'No subas el precio antes de tener 10 clientes de pago.';
+  if (!p) return 'Fija un **precio de partida** y prueba dos versiones en tu landing. Quédate con la que más gente pague, no con la que más guste.';
+  const lead = given.price ? '**' + p.txt + '**' + (p.lo ? ' frente a un mercado de ' + p.lo + ' a ' + p.hi : '') + '. ' : 'Como no dijiste precio, parto de **' + p.txt + '** (orientativo)' + (p.lo ? '; el mercado cobra de ' + p.lo + ' a ' + p.hi : '') + '. ';
+  const tier = p.tier ? '**' + p.tier.l + '.** ' + p.tier.d + ' ' : '';
+  const pay = p.pay ? 'Recuperas la inversión en ≈ ' + p.pay + ' meses (estimado). ' : '';
+  return lead + tier + pay + 'No subas el precio hasta tener 10 clientes de pago.';
 }
 function modelAdvice(D, o) {
-  const m = o && o.model; if (!m) return 'Elige el modelo de negocio que mejor describa cómo ganas dinero: con él adapto el análisis.';
-  return 'Por lo que cuentas, encaja **' + m.name + '**' + (m.alt ? ' (también podría ser ' + m.alt + ')' : '') + '. ' + (m.earn ? 'Cómo se gana dinero: ' + lc(m.earn).replace(/\.$/, '') + '. ' : '') + (m.risk ? 'Ojo con ' + lc(m.risk).replace(/\.$/, '') + '. ' : '') + 'La elección es tuya; yo solo te oriento.';
+  const m = o && o.model; if (!m) return 'Elige el modelo que mejor describa cómo ganas dinero y adapto el análisis.';
+  return '**' + m.name + '** encaja con tu idea' + (m.alt ? ' (alternativa: ' + m.alt + ')' : '') + '. ' + (m.earn ? 'Así ganas dinero: ' + lc(m.earn).replace(/\.$/, '') + '. ' : '') + (m.risk ? 'Cuidado con ' + lc(m.risk).replace(/\.$/, '') + '. ' : '') + 'Decides tú; yo te oriento.';
 }
 function strategyAdvice(D) {
   const a = D.ads, r = D.recs[0];
-  const hueco = D.nC ? 'Tu hueco frente a ' + D.nC + (D.nC === 1 ? ' rival' : ' rivales') + ': precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**. ' : '';
-  const canal = a.verdict === 'ok' ? 'Los anuncios pueden salir a cuenta (≈ ' + eur(D, a.cacAds) + ' por cliente): prueba con un tope pequeño. ' : 'Con anuncios cada cliente te costaría ≈ ' + eur(D, a.cacAds) + ' (máximo sano ' + eur(D, a.maxCac) + '): empieza por comunidades, alianzas y recomendaciones. ';
+  const hueco = D.nC ? 'Tu hueco frente a ' + plural(D.nC, 'rival', 'rivales') + ': precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**. ' : '';
+  const canal = a.verdict === 'ok' ? 'Los anuncios pueden salir a cuenta (≈ ' + eur(D, a.cacAds) + ' por cliente): prueba con un tope pequeño. ' : 'Con anuncios cada cliente cuesta ≈ ' + eur(D, a.cacAds) + ' (máximo sano ' + eur(D, a.maxCac) + '). Empieza por comunidades, alianzas y recomendaciones. ';
   return hueco + canal + (r ? 'Lo primero: **' + lc(r.t).replace(/\.$/, '') + '** (' + lc(r.eff) + ').' : '');
 }
 function viabilityAdvice(D) {
   const frn = D.risks[0], e = D.econ;
-  const v = D.band.cls === 'ok' ? 'los números acompañan' : D.band.cls === 'warn' ? 'se sostiene, pero hay que ajustarla antes de gastar' : 'tal como está, tiene demasiados frenos';
-  return '**' + D.viab + ' sobre 100** (' + lc(D.band.l) + '): ' + v + '. Tu mejor baza es ' + lc(D.best.l) + ' (' + D.best.v + ') y lo que más tira hacia abajo, ' + lc(D.worst.l) + ' (' + D.worst.v + '). ' + (e.be ? 'Necesitas ≈ ' + e.be + ' clientes para cubrir costes y con tu presupuesto alcanzarías ≈ ' + e.reach + '. ' : '') + (frn ? 'Primer freno: **' + frn.title + '**; ' + lc(frn.fix).replace(/\.$/, '') + '.' : '');
+  return '**' + D.viab + '/100** (' + lc(D.band.l) + '). ' + verdictLine(D) + ' Tu mejor baza: ' + lc(D.best.l) + ' (' + D.best.v + '). Lo que más te baja: ' + lc(D.worst.l) + ' (' + D.worst.v + '). ' + (e.be ? 'Necesitas ≈ ' + e.be + ' clientes para cubrir costes y con tu presupuesto llegas a ≈ ' + e.reach + '. ' : '') + (frn ? 'Primer freno: **' + frn.title + '**. ' + frn.fix.replace(/\.$/, '') + '.' : '');
 }
 function consult(D, det, o) {
   o = o || {};
@@ -9696,26 +12264,382 @@ function consult(D, det, o) {
   if (!given.budget) sup.push('un presupuesto de ' + eur(D, det && det.budget ? det.budget.v : D.budget));
   if (!given.price && D.price) sup.push('un precio de ' + D.price.txt);
   if (det && det.sector && det.sector.auto && det.sector.conf === 'baja') sup.push('cifras generales de mercado, porque no reconozco un sector concreto');
-  const mine = D.band.cls === 'ok' ? 'Hay una oportunidad clara y los números acompañan.' : D.band.cls === 'warn' ? 'La idea se sostiene, pero conviene ajustarla antes de gastar dinero.' : 'Tal como está, hay demasiados frenos: conviene replantearla antes de invertir.';
-  const m1 = { t: J('## Mi análisis de tu idea', '**' + D.name + '** · ' + D.sector + (D.type ? ' · ' + D.type : '') + '. ' + mine, sup.length ? 'He supuesto ' + (sup.length > 1 ? sup.slice(0, -1).join(', ') + ' y ' + sup[sup.length - 1] : sup[0]) + '. Dime los tuyos y lo recalculo.' : ''),
+  const m1 = { t: J('## Mi análisis de tu idea', '**' + verdictLine(D) + '**', B(['Idea: **' + D.name + '** · ' + D.sector + (D.type ? ' · ' + D.type : '')]), sup.length ? 'Supuse ' + (sup.length > 1 ? sup.slice(0, -1).join(', ') + ' y ' + sup[sup.length - 1] : sup[0]) + '. Dime los tuyos y lo recalculo.' : ''),
     stats: [
       { l: 'Viabilidad', v: D.viab + '/100', s: D.band.l },
       { l: 'Éxito (orientativo)', v: D.prob + ' %', s: 'riesgo ' + lc(D.rband.l).replace(/^riesgo /, '') },
       { l: 'Lo que puedes captar', v: D.clients > 0 ? D.som : '—', s: D.clients > 0 ? '≈ ' + D.clients + ' clientes el 1.er año' : 'falta presupuesto' },
-      { l: 'Rivales', v: String(D.nC), s: D.comps[0] ? 'el mayor ≈ ' + D.F.fn(D.comps[0].share, D.comps[0].share % 1 ? 1 : 0) + ' %' : 'sin rivales directos' },
+      { l: 'Rivales', v: String(D.nC), s: D.comps[0] ? 'el mayor ≈ ' + pctTxt(D, D.comps[0].share) + ' %' : 'sin rivales directos' },
     ] };
   const m2 = { t: J('## Mis recomendaciones', B(['**Precio.** ' + priceAdvice(D, given), '**Modelo de negocio.** ' + modelAdvice(D, o), '**Estrategia.** ' + strategyAdvice(D), '**Viabilidad.** ' + viabilityAdvice(D)])) };
-  const m3 = { t: J('Es una **estimación rápida** con datos de mercado y supuestos de ValidLance, no una predicción. En **Compite** se afina con tus datos y en **Valida** la contrastas con clientes reales antes de gastar dinero.', regNote(D)) };
+  const m3 = { t: J('Es una **estimación rápida** con datos de mercado y supuestos de ValidLance, no una predicción.', '**Siguiente paso:** afínala en **Compite** y contrástala con clientes reales en **Valida** antes de gastar.', regNote(D)) };
   return { seq: [m1, m2, m3] };
 }
 function improve(D) {
   const props = D.props, recs = D.recs.slice(0, 3);
-  return { t: J('## Cómo subir la viabilidad', 'Ahora sale **' + D.viab + '/100**. Lo que más pesa:', B([D.worst.l + ' (' + D.worst.v + '): es tu factor más débil, empieza por ahí.'].concat(props.length ? ['Propuesta que más suma: **' + props[0].title + '** (≈ +' + props[0].gain + ' puntos).'] : []).concat(recs.map((c) => '**' + c.t + '** (' + lc(c.eff) + '). ' + c.why))), 'Aplica **una** mejora, vuelve a mirar la puntuación y contrástala con clientes reales en Valida.') };
+  return { t: J('## Cómo subir la viabilidad', '**Ahora: ' + D.viab + '/100. Empieza por ' + lc(D.worst.l) + '.**', B([D.worst.l + ' (' + D.worst.v + '): tu factor más débil.'].concat(props.length ? ['Lo que más suma: **' + props[0].title + '** (≈ +' + props[0].gain + ' puntos).'] : []).concat(recs.map((c) => '**' + c.t + '** (' + lc(c.eff) + '). ' + c.why))), '**Siguiente paso:** aplica **una** mejora, mira la nota otra vez y contrástala en Valida.') };
 }
 
 const API = { build: build, summary: summary, topic: topic, concept: concept, stats: stats, consult: consult, improve: improve };
 if (typeof module !== 'undefined' && module.exports) module.exports = API;
 if (typeof LV !== 'undefined') LV.agentExplain = API;
+})();
+
+/* ============================================================
+   Astro como mentor personal: conoce a la persona (S.me) y su hoja de ruta (LV.rt) y responde con ellas
+   · Se dirige por su nombre con naturalidad (no en cada frase): al saludar, al animar, al dar el siguiente paso y cada pocas respuestas.
+   · Añade a las respuestas existentes una línea «En tu caso» según su situación, su tiempo y su presupuesto.
+   · Respuestas propias: mi ruta, qué toca esta semana / hoy, ajustar la ruta con lo que cuenta («ahora tengo 5 horas»), marcar pasos hechos,
+     revisar un plan («voy a hacer el logo primero»), dudas sobre dejar el trabajo, bloqueos y motivación.
+   · Todo es determinista y local (sin red): mismo perfil + mismo estado = misma respuesta. Nunca inventa datos de mercado ni da asesoramiento legal o financiero.
+   · API: LV.coach = { nm, has, decorate, nextReply, routeReply, todayReply, adjustReply, doneReply, meReply, nameReply, quitReply, stuckReply, planReply, tuneReply,
+                       welcome, intro, afterMark, ragProfile, ragRoute, line }
+   ============================================================ */
+(function () {
+'use strict';
+const S = LV.state;
+const RT = LV.route;
+const J = function () { return Array.prototype.filter.call(arguments, Boolean).join('\n\n'); };
+const B = (a) => a.map((x) => '- ' + x).join('\n');
+const lcf = (s) => { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); };
+const rt = () => LV.rt;
+const me = () => S.me || {};
+const nm = () => (me().name ? String(me().name).split(' ')[0] : '');
+const has = () => !!me().done;
+const info = () => { try { return rt() && rt().info(); } catch (e) { return null; } };
+const hrs = (h) => (Math.round(h * 2) / 2).toString().replace('.', ',') + ' h';
+const MODN = { compite: 'Compite', valida: 'Valida', genera: 'Genera', lanza: 'Lanza', panel: 'el Panel' };
+const ac = (l, go) => (typeof go === 'string' ? { l: l, go: go } : Object.assign({ l: l }, go));
+/** «Lucía, » delante de una frase que sigue en minúscula; vacío si no hay nombre. */
+const vo = () => (nm() ? nm() + ', ' : '');
+
+// ---------- cómo se describe la persona ----------
+const HLAB = { 3: 'hasta 3 h a la semana', 6: 'entre 4 y 8 h a la semana', 12: 'entre 9 y 15 h a la semana', 22: 'entre 16 y 30 h a la semana', 35: 'más de 30 h a la semana' };
+const CLAB = { c0: 'casi sin presupuesto', c1: 'hasta 500 €', c2: 'entre 500 y 3.000 €', c3: 'más de 3.000 €' };
+const OLAB = { est: 'estudias', emp: 'trabajas por cuenta ajena', aut: 'ya eres autónomo/a', paro: 'estás buscando trabajo', otra: '' };
+const GLAB = { extra: 'conseguir ingresos extra', vivir: 'vivir de tu negocio', validar: 'validar tu idea sin riesgo', clase: 'sacar adelante tu proyecto de clase', crecer: 'montar algo grande' };
+const WLAB = { man: 'por las mañanas', tar: 'por las tardes', noc: 'por las noches', fin: 'los fines de semana' };
+const whenTxt = () => { const w = (me().when || []).map((x) => WLAB[x]).filter(Boolean); return w.length ? w.slice(0, -1).join(', ') + (w.length > 1 ? ' y ' : '') + w[w.length - 1] : ''; };
+const hoursTxt = () => (me().hours ? HLAB[me().hours] || '' : '');
+const capTxt = () => CLAB[me().cap] || '';
+/** Frase corta con lo que Astro sabe: «estudias, con hasta 3 h a la semana y casi sin presupuesto». */
+function profileLine() {
+  const m = me(), a = [];
+  if (OLAB[m.occ]) a.push(OLAB[m.occ]);
+  const b = []; if (hoursTxt()) b.push(hoursTxt()); if (capTxt()) b.push(capTxt());
+  if (b.length) a.push('con ' + b.join(' y ').replace(/^con /, ''));
+  return a.join(', ');
+}
+
+// ---------- el nombre: cuándo y cómo ----------
+const OPEN = {
+  q: ['Buena pregunta, {n}.', 'Vamos a ello, {n}.', 'Claro, {n}.', 'Te lo cuento, {n}.'],
+  emo: ['Respira, {n}.', 'Te entiendo, {n}.', 'Vamos paso a paso, {n}.', 'Es normal, {n}.'],
+  go: ['Esto es lo que veo, {n}.', 'Mira, {n}.', 'Va por partes, {n}.'],
+  thanks: ['De nada, {n}.', 'Cuando quieras, {n}.'],
+  bye: ['Cuídate, {n}.', 'Hasta pronto, {n}.'],
+  greet: ['Hola, {n}.', '¡Hola, {n}!', 'Me alegra verte, {n}.'],
+};
+const KIND = { fear: 'emo', overwhelm: 'emo', doubt: 'emo', lowtime: 'emo', lowbudget: 'emo', nopath: 'emo', stuck: 'emo', 'smart-nosales': 'emo', quit: 'emo', thanks: 'thanks', bye: 'bye', greet: 'greet', consult: 'go', improve: 'go', 'smart-worth': 'go', 'smart-opinion': 'go', 'idea-in': 'go', summary: 'go', score: 'go' };
+const NOOPEN = /^(noop|clarify|welcome|tour|rag|name|route|today|adjust|done|plan-check|tune|chitchat|here|awayme|presoff|preson|autoopen|spec|mod|recommend|gate|nav|help|again|appreset|apptheme|appprice|premium|agents|community|discover|fill|consult-ask|improve-ask)|^me$/;
+const cad = { n: 0, last: -99, pick: 0 };
+/** Frase con el nombre que abre la respuesta, o '' si ahora no toca (se usa de forma natural, no en cada mensaje). */
+function opener(id) {
+  const n = nm(); if (!n) return '';
+  const kind = KIND[id] || 'q', emo = kind === 'emo' || kind === 'greet' || kind === 'bye';
+  if (NOOPEN.test(id) && !emo) return '';
+  const first = cad.n === 0, due = cad.n - cad.last >= 3;
+  cad.n++;
+  if (!(first || due || emo && cad.n - cad.last >= 2)) return '';
+  cad.last = cad.n - 1;
+  const pool = OPEN[kind] || OPEN.q; return pool[cad.pick++ % pool.length].replace('{n}', n);
+}
+
+// ---------- líneas «en tu caso» que se añaden a respuestas ya existentes ----------
+const MICRO = {
+  learn: 'Pregúntame «¿Cómo funciona ValidLance?» y lee las cinco ideas clave',
+  idea: 'Escribe tu idea en una frase: qué vendes, a quién y cuánto cobrarías',
+  compete: 'Pulsa «Analizar» en Compite y lee solo el resumen',
+  income: 'Calcula en Estrategia cuántos clientes necesitas para tu objetivo',
+  price: 'Prueba dos precios en Estrategia y mira cuántos clientes necesitas con cada uno',
+  talk: 'Escribe a 3 personas de tu público y pídeles 15 minutos para una conversación',
+  land: 'Redacta solo el titular y el botón de tu landing',
+  survey: 'Elige las 5 preguntas más importantes de la encuesta',
+  traffic: 'Comparte tu enlace en dos sitios y escribe a 5 personas',
+  measure: 'Anota en Valida las visitas y respuestas que lleves',
+  presell: 'Escribe a quien dijo que sí y propón un pago simbólico',
+  decide: 'Abre el Panel y lee el veredicto Go / No-Go',
+  mvp: 'Haz una lista de lo mínimo que necesitas para vender hoy',
+  roles: 'Escribe en 5 líneas quién hace qué y cómo se reparte el dinero',
+  legal: 'Abre Lanza y mira solo el primer trámite',
+  first: 'Haz una lista de 10 personas a las que podrías ofrecérselo esta semana',
+  present: 'Esquematiza la entrega: tu idea, tus números y tu decisión',
+  review: 'Anota qué probaste, qué aprendiste y qué cambias',
+};
+const stepNow = () => { const i = info(); return i && !i.finished ? (i.week.steps[0] || i.next[0] || null) : null; };
+const slotsTxt = (i) => (i && i.slots && i.slots.length ? i.slots.join(' · ') : '');
+function capAdvice() {
+  const c = me().cap; if (!c) return '';
+  if (c === 'c0') return 'tu ruta usa solo canales gratuitos hasta que haya demanda demostrada';
+  if (c === 'c1') return 'guarda al menos la mitad y, si quieres probar anuncios, que sean como mucho 50 €';
+  return 'no gastes más del 10 % antes de ver demanda (' + (RT.capEur(me()) ? 'unos ' + Math.round(RT.capEur(me()) * 0.1 / 10) * 10 + ' €' : 'una parte pequeña') + ')';
+}
+const FORYOU = {
+  lowbudget: () => { const a = capAdvice(); return a ? '**En tu caso** (' + capTxt() + '): ' + a + '.' : ''; },
+  lowtime: () => {
+    const i = info(), h = hoursTxt(), w = whenTxt(); if (!h && !i) return '';
+    const s = stepNow();
+    return '**En tu caso**' + (h ? ' (' + h + (w ? ', ' + w : '') + ')' : '') + ': ' + (i ? 'son ' + i.R.nBlocks + (i.R.nBlocks === 1 ? ' bloque' : ' bloques') + ' de ' + i.R.block + ' min' + (slotsTxt(i) ? ' (' + slotsTxt(i) + ')' : '') : 'un solo frente cada vez') + '.' + (s ? ' Esta semana: ' + lcf(s.t) + '.' : '');
+  },
+  fear: () => {
+    const m = me(), a = [];
+    if (m.occ === 'emp') a.push('no dejas tu empleo: lo pruebas en paralelo, sin jugártelo todo');
+    else if (m.occ === 'est') a.push('estudias a la vez: tu ruta baja a 1 bloque en semanas de exámenes y se retoma después');
+    else if (m.cap === 'c0') a.push('tu ruta empieza sin gastar dinero');
+    else if (RT.capEur(m)) a.push('tu tope de prueba es de unos ' + Math.round(RT.capEur(m) * 0.1 / 10) * 10 + ' € (el 10 % de lo que tienes)');
+    const s = stepNow();
+    return a.length || s ? '**En tu caso:** ' + (a.length ? a.join('; ') + '.' : '') + (s ? ' Tu único paso por ahora: ' + lcf(s.t) + '.' : '') : '';
+  },
+  overwhelm: () => { const s = stepNow(); return s ? '**Lo único que te toca esta semana:** ' + lcf(s.t) + ' (≈ ' + hrs(s.h) + ').' : ''; },
+  doubt: () => { const i = info(); return i ? '**Con tu ritmo** (' + hoursTxt() + '), validar son ≈ ' + phaseEnd(i, 3) + ' semanas. Después decides con datos.' : ''; },
+  nopath: () => { const i = info(); return i ? '**Con tu perfil** (' + profileLine() + '), ya tienes una ruta: la abro cuando quieras.' : ''; },
+  progress: () => { const i = info(); return i ? '**Tu ruta:** ' + i.prog.pct + ' % (' + i.prog.n + ' de ' + i.prog.total + ' pasos)' + (i.finished ? '. Completa.' : ' · semana ' + i.week.n + ' de ' + i.R.nWeeks + '.') : ''; },
+  'smart-time': () => { const i = info(); return i ? '**A tu ritmo** (' + hoursTxt() + '): tu ruta completa son ≈ ' + i.R.nWeeks + ' semanas y la prueba de demanda termina hacia la semana ' + phaseEnd(i, 3) + '.' : ''; },
+  'smart-worth': () => {
+    const m = me(); if (m.occ === 'emp') return '**En tu caso:** aunque salga bien, no dejes tu empleo hasta tener clientes de pago estables y ahorros de varios meses.';
+    if (m.occ === 'est') return '**En tu caso:** estás estudiando, así que puedes permitirte probarlo despacio y sin arriesgar dinero.';
+    return '';
+  },
+  'smart-chan': () => (me().cap === 'c0' ? '**En tu caso** (sin presupuesto): empieza por canales gratuitos: tu círculo, comunidades de tu público y mensajes directos.' : ''),
+  'smart-goal': () => (me().goal === 'vivir' ? '**Tu objetivo es vivir de esto:** en tu ruta, el paso «cuántos clientes necesitas» convierte ese ingreso en una cifra concreta.' : me().goal === 'extra' ? '**Tu objetivo son ingresos extra:** con un ingreso extra bastan pocos clientes; prioriza un precio que compense tu tiempo.' : ''),
+  plan: () => (has() ? '**Tu plan personal** está en el Centro de control, en «Tu ruta»: se adapta a tu tiempo.' : ''),
+  chan: () => (me().cap === 'c0' ? '**En tu caso** (sin presupuesto): prioriza tu círculo, comunidades y mensajes directos antes que anuncios.' : ''),
+  consult: () => planHint(),
+  'idea-in': () => planHint(),
+};
+function planHint() { const i = info(); return i && !i.finished ? '**Con tu tiempo** (' + hoursTxt() + '), tu ruta de validación son ≈ ' + phaseEnd(i, 3) + ' semanas. Tu siguiente paso: ' + lcf(i.next[0].t) + '.' : ''; }
+/** Semana en la que termina la fase p (o la última). */
+function phaseEnd(i, p) { const ph = i.R.phases.find((x) => x.id === p); return ph && ph.w1 ? ph.w1 : i.R.nWeeks; }
+
+/** Aplica nombre y línea «en tu caso» a una respuesta de Astro (no toca las respuestas del servidor de IA ni las guías en curso). */
+function decorate(R, E, raw) {
+  if (!R || R.flowOn) return R;
+  const id = String(R.id || ''), parts = R.seq && R.seq.length ? R.seq : [R];
+  const head = parts[0], tail = parts[parts.length - 1];
+  if (!head || !head.t) return R;
+  try {
+    if (has() && FORYOU[id] && !(R.seq && R.seq.length > 3)) { const l = FORYOU[id](E, raw); if (l && tail.t.indexOf('En tu caso') < 0) tail.t = J(tail.t, l); }
+    if (id === 'greet') head.t = head.t.replace(/^Hola\.\s*/, '');
+    const o = opener(id);
+    if (o && !/^## /.test(head.t) && head.t.indexOf(nm()) < 0) head.t = J(o, head.t);
+  } catch (e) { /* una frase personalizada nunca debe romper la respuesta */ }
+  return R;
+}
+/** Invitación a contar la situación, para quien no hizo el perfil: una vez por sesión y solo en temas donde ayuda. */
+let invited = 0;
+const INVITE = /^(lowbudget|lowtime|fear|overwhelm|doubt|nopath|next|smart-time|smart-worth)$/;
+function invite(R, E) {
+  if (has() || invited >= 1 || !R || !INVITE.test(String(R.id || ''))) return R;
+  invited++; const tail = R.seq && R.seq.length ? R.seq[R.seq.length - 1] : R;
+  tail.t = J(tail.t, 'Si me cuentas tu **situación, tu tiempo y tu presupuesto** (1 minuto), te preparo una ruta a tu medida.');
+  tail.acts = (tail.acts || []).concat([{ l: 'Preparar mi ruta', fn: 'profile' }]).slice(0, 3);
+  return R;
+}
+
+// ---------- respuestas propias ----------
+const noProfile = (what) => ({ t: J('**Todavía no sé tu situación**, así que ' + what + '.', 'Cuéntamela en un minuto (tu situación, tu objetivo, tu tiempo y tu presupuesto) y te preparo una ruta paso a paso que cabe en tu semana.'), acts: [{ l: 'Preparar mi ruta', fn: 'profile' }], qr: ['¿Qué es ValidLance?', 'Definir mi proyecto paso a paso'], id: 'route' });
+const stepActs = (s) => [s && s.mod ? ac('Abrir ' + MODN[s.mod], s.mod) : null, s ? { l: 'Marcar como hecho', fn: 'rtMark', id: s.id } : null].filter(Boolean);
+
+function meReply() {
+  if (!has() && !me().name) return noProfile('te conozco poco y no puedo personalizar nada todavía');
+  const m = me(), p = LV.me.parts(), rows = [];
+  if (p.name) rows.push('**Nombre:** ' + p.name);
+  if (p.occ) rows.push('**Situación:** ' + [p.occ].concat(p.res).join(' · '));
+  if (p.goal) rows.push('**Objetivo:** ' + p.goal + (p.goalTxt ? ' («' + p.goalTxt + '»)' : ''));
+  if (p.hours) rows.push('**Tiempo:** ' + p.hours + (p.when.length ? ' (' + p.when.join(', ') + ')' : ''));
+  if (p.cap) rows.push('**Presupuesto:** ' + p.cap);
+  const hi = nm() ? 'Esto es lo que sé de ti, ' + nm() + ':' : 'Esto es lo que sé de ti:';
+  return { t: J(hi, rows.length ? B(rows) : 'Todavía casi nada.', 'Se guarda **solo en este navegador**. Puedes cambiarlo desde el menú o diciéndomelo aquí («ahora tengo 6 horas a la semana»).'), acts: [{ l: 'Editar mi perfil', fn: 'profile' }, has() ? ac('Ver mi ruta', 'hub') : null].filter(Boolean), qr: ['Mi ruta paso a paso', '¿Qué toca esta semana?', 'Ajustar mi ruta'], id: 'me' };
+}
+const STOPN = /^(la|el|los|las|un|una|que|de|del|por|para|con|sin|y|o|a|en|mi|tu|su|muy|mas|menos|bien|mal|asi|como|cuando|donde|quien|si|no|ya|pues|algo|nada|todo|tiempo|ayuda|atencion|falta|gracias|pena|igual|favor|ver)$/;
+function nameFrom(raw) {
+  const m = String(raw || '').match(/(?:me llamo|mi nombre es|ll[aá]mame|puedes llamarme|prefiero que me llames)\s+([A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ' -]{1,28})/i);
+  if (!m) return '';
+  const ws = m[1].replace(/[.,;:!?]+$/, '').trim().split(/\s+/).slice(0, 3);
+  const keep = []; for (const w of ws) { if (STOPN.test(w.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, ''))) break; keep.push(w); }
+  return keep.join(' ');
+}
+function nameReply(X) {
+  const n = nameFrom(X.raw); if (!n) return null;
+  LV.me.set({ name: n }); const f = nm();
+  return { t: J('Un placer, **' + f + '**. A partir de ahora te llamo así.', has() ? 'Tu ruta sigue igual: solo cambia cómo me dirijo a ti.' : 'Si me cuentas tu situación, tu tiempo y tu presupuesto, te preparo una **ruta a tu medida**.'), acts: has() ? [] : [{ l: 'Preparar mi ruta', fn: 'profile' }], id: 'name' };
+}
+
+function routeReply(E, scope) {
+  if (!has()) return noProfile('no puedo preparar tu ruta a tu medida');
+  const i = info(); if (!i) return noProfile('no puedo preparar tu ruta a tu medida');
+  const R = i.R, h = hoursTxt(), n = nm();
+  const head = (n ? n + ', esta' : 'Esta') + ' es tu ruta' + (h ? ' con ' + h : '') + ': **≈ ' + R.nWeeks + ' semanas** hasta tus primeros clientes (' + hrs(R.total) + ' de trabajo).';
+  if (i.finished) return { t: J('**Has recorrido todos los pasos de tu ruta' + (n ? ', ' + n : '') + '.**', 'Ahora toca decidir con tus datos: abre el Panel y revisa el Go / No-Go (seguir, ajustar o parar).'), acts: [ac('Abrir el Panel', 'panel')], qr: ['Ajustar mi ruta', '¿Cómo voy?'], id: 'route' };
+  const wk = i.week, rows = (wk.steps.length ? wk.steps : i.next.slice(0, 2)).slice(0, 4);
+  const full = scope === 'full';
+  const ph = R.phases.filter((p) => p.steps.length).map((p) => '**Fase ' + p.id + ' · ' + p.t + '** (sem. ' + p.w0 + (p.w1 > p.w0 ? '–' + p.w1 : '') + '): ' + lcf(p.goal) + '.');
+  return {
+    t: J(head, full ? B(ph) : '', '**Esta semana (semana ' + (wk.n || 1) + ', ≈ ' + hrs(wk.h || R.usable) + '):**', B(rows.map((s) => s.t + ' (≈ ' + hrs(s.h) + (s.mod ? ' · ' + MODN[s.mod] : '') + ')')),
+      'Reserva **' + R.nBlocks + (R.nBlocks === 1 ? ' bloque' : ' bloques') + ' de ' + R.block + ' min**' + (slotsTxt(i) ? ': ' + slotsTxt(i) : '') + '.',
+      (R.notes || []).length ? B(R.notes.slice(0, 2)) : '', 'Llevas **' + i.prog.pct + ' %**. Si algo cambia (tiempo, dinero, trabajo), dímelo y la reajusto.'),
+    acts: [rows[0] && rows[0].mod ? ac('Abrir ' + MODN[rows[0].mod], rows[0].mod) : null, ac('Ver «Tu ruta»', 'hub')].filter(Boolean), qr: ['¿Qué toca hoy?', 'Ajustar mi ruta', full ? '¿Cómo voy?' : 'Mi ruta completa'], id: 'route',
+  };
+}
+function nextReply(E) {
+  if (!has()) return null; const i = info(); if (!i) return null;
+  if (i.finished) return routeReply(E);
+  const s = i.week.steps[0] || i.next[0];
+  return { t: J('**' + (nm() ? nm() + ', tu' : 'Tu') + ' siguiente paso:** ' + s.t + '.', s.why, 'Son ≈ ' + hrs(s.h) + (s.mod ? ' y se hace en **' + MODN[s.mod] + '**' : '') + '. Llevas **' + i.prog.pct + ' %** de tu ruta (semana ' + (i.week.n || 1) + ' de ' + i.R.nWeeks + ').'), acts: stepActs(s), qr: ['¿Qué toca hoy?', 'Mi ruta paso a paso', 'Ajustar mi ruta'], id: 'next' };
+}
+function todayReply(E, X) {
+  if (!has()) return noProfile('no puedo decirte qué hacer hoy a tu medida');
+  const i = info(); if (!i) return noProfile('no puedo decirte qué hacer hoy a tu medida');
+  if (i.finished) return routeReply(E);
+  const s = i.week.steps[0] || i.next[0], micro = MICRO[s.id] || s.t;
+  const mm = X && X.n ? X.n.match(/\b(\d+)\s*(?:min|minutos)\b/) : null, hh = X && X.n ? X.n.match(/\b(una|1)\s*hora\b/) : null, mh = X && X.n && /media hora/.test(X.n);
+  const hn = X && X.n ? X.n.match(/\b(\d+|dos|tres|cuatro)\s*horas?\b/) : null, hv = hn ? ({ dos: 2, tres: 3, cuatro: 4 }[hn[1]] || Number(hn[1])) : 0;
+  const mins = mm ? Number(mm[1]) : hh ? 60 : mh ? 30 : hv && hv <= 8 ? hv * 60 : 0, short = mins && mins <= 25;
+  const head = vo() ? vo().replace(/^./, (c) => c.toUpperCase()).replace(/, $/, ', hoy:') : 'Hoy:';
+  const full = Math.round(s.h * 60), act = stepActs(s), qr = ['Ya lo hice', 'Mi ruta paso a paso', 'Estoy atascado'];
+  const mt = mins >= 60 ? hrs(mins / 60) : mins + ' min';
+  if (mins && !short) { // cuánto cabe en el rato que tiene: primero el paso actual y, si sobra, los siguientes
+    const pool = i.week.steps.concat(i.next).filter((x, k, arr) => arr.findIndex((y) => y.id === x.id) === k);
+    const fit = []; let used = 0;
+    pool.forEach((x) => { const c = Math.round(x.h * 60); if (!fit.length || (fit.length < 3 && used + c <= mins)) { fit.push(x); used += c; } });
+    if (fit.length > 1) return { t: J('**' + head.replace(/hoy:$/, 'con ' + mt + ':').replace(/^Hoy:$/, 'Con ' + mt + ':') + '** esto te cabe:', B(fit.map((x) => x.t + ' (≈ ' + hrs(x.h) + ')')), 'Empieza por el primero; si te quedas sin tiempo, lo retomas otro día. Cuando termines uno, dímelo («ya lo hice»).'), acts: act, qr: qr, id: 'today' };
+    return { t: J('**' + head.replace(/hoy:$/, 'con ' + mt + ':').replace(/^Hoy:$/, 'Con ' + mt + ':') + '** ' + micro + '.', full > mins ? 'El paso entero son ≈ ' + hrs(s.h) + ' («' + lcf(s.t) + '»): hoy basta con avanzar; no hace falta terminarlo.' : 'Cabe en tu rato. Cuando termines, dímelo («ya lo hice»).'), acts: act, qr: qr, id: 'today' };
+  }
+  return {
+    t: J('**' + head + '** ' + micro + '.',
+      short ? 'Con ' + mins + ' minutos solo da para eso; no empieces nada más.' : 'Es el primer movimiento de «' + lcf(s.t) + '». Cuenta ≈ ' + i.R.block + ' min' + (slotsTxt(i) ? ' (te encaja ' + i.slots[0] + ')' : '') + '.',
+      'Cuando termines, dímelo («ya lo hice») y paso al siguiente.'), acts: act, qr: qr, id: 'today' };
+}
+function phaseWeek(r, k) { const ph = r.R.phases.find((x) => x.id === k); return ph ? ph.w1 : r.R.nWeeks; }
+function adjustReply(E, X) {
+  const p = RT.parse(X.n); if (!p) return null;
+  const before = info(), w0 = before ? before.R.nWeeks : 0;
+  const r = LV.me.patchSay(X.n); if (!r) return null;
+  if (LV.rt) LV.rt.ensure();
+  const after = info(), w1 = after ? after.R.nWeeks : 0;
+  const what = r.said.join(', ').replace(/, ([^,]*)$/, ' y $1');
+  const diff = w0 && w1 && w0 !== w1 ? 'Tu ruta pasa de **' + w0 + ' a ' + w1 + ' semanas**' + (w1 > w0 ? ' (más tiempo en total, pero con un ritmo que sí puedes sostener)' : '') + '.' : w1 ? 'Tu ruta queda en **' + w1 + ' semanas**.' : '';
+  const s = after && !after.finished ? (after.week.steps[0] || after.next[0]) : null;
+  const note = after && after.R.notes && after.R.notes[0] ? after.R.notes[0] : '';
+  return { t: J('Anotado' + (nm() ? ', ' + nm() : '') + ': ' + what + '. Reajusto tu ruta.', diff, s ? '**Esta semana:** ' + lcf(s.t) + ' (≈ ' + hrs(s.h) + ').' : '', note, 'Se guarda solo en tu navegador. Si te equivoqué, corrígeme o edita tu perfil.'),
+    acts: [ac('Ver «Tu ruta»', 'hub'), { l: 'Editar mi perfil', fn: 'profile' }], qr: ['Mi ruta paso a paso', '¿Qué toca hoy?'], id: 'adjust' };
+}
+const DONE = [
+  ['talk', /(habl|entrevist|pregunt|conversa|charl)\w*.{0,40}(persona|gente|cliente|usuari|contacto|publico|potencial)|(10|diez)\s+(entrevistas|conversaciones|personas)/],
+  ['land', /(cree|hice|monte|publique|termine|acabe|tengo|ya esta)\s+(ya )?(la |mi )?(landing|pagina de captacion|pagina de ventas)|landing\s+(hecha|creada|lista|publicada|terminada)/],
+  ['survey', /(hice|cree|prepare|monte|termine)\s+(ya )?(la |mi )?encuesta|encuesta\s+(hecha|creada|lista|terminada)/],
+  ['traffic', /(consegui|tengo|llegue a|alcance)\s+(ya )?(las |mis )?(primeras )?(100|cien)\s+visitas/],
+  ['measure', /(anote|apunte|registre|meti)\s+(ya )?(las |mis )?(visitas|resultados|respuestas|datos)/],
+  ['presell', /(primer(a)? (pago|preventa|venta)|alguien (ha )?(pagado|comprado|reservado)|hice (la )?preventa)/],
+  ['compete', /(genere|hice|termine|lei|tengo)\s+(ya )?(el |mi )?(analisis|informe)|analisis\s+(hecho|listo|terminado)/],
+  ['price', /(probe|defini|fije|elegi|decidi)\s+(ya )?(mi |el )?precio|precio\s+(definido|decidido|fijado)/],
+  ['income', /(calcule|saque)\s+(ya )?(los |mis )?(clientes|numeros)/],
+  ['decide', /(decidi|tome la decision)\s+(ya )?(seguir|parar|ajustar)|(go|no go)\s+(decidido|hecho)/],
+  ['mvp', /(hice|termine|monte|tengo)\s+(ya )?(el |mi |la )?(mvp|prototipo|maqueta|version minima|piloto)/],
+  ['legal', /(mire|revise|hice|termine)\s+(ya )?(los |mis )?tramites/],
+  ['first', /(consegui|cerre|tengo)\s+(ya )?(mis |los )?(primeros |3 |tres )?(3 )?clientes/],
+  ['learn', /(lei|estudie|termine)\s+(ya )?la guia/],
+  ['idea', /(escribi|defini|concrete|tengo)\s+(ya )?(mi )?idea/],
+  ['review', /(hice|termine)\s+(ya )?(la )?revision semanal/],
+];
+function doneReply(E, X) {
+  if (!has()) return noProfile('aún no tengo una ruta tuya donde marcar avances');
+  const i = info(); if (!i) return noProfile('aún no tengo una ruta tuya donde marcar avances');
+  const hit = DONE.find((d) => d[1].test(X.n) && i.R.steps.some((s) => s.id === d[0]));
+  const generic = /^(ya |ya lo |lo )?(hice|he hecho|hecho|termine|he terminado|acabe|completado|listo|hecho ya|ya esta|ya lo hice|ya lo he hecho|lo hice|lo he hecho|esta hecho|ya lo termine)\b/.test(X.n) && X.wc <= 7;
+  if (hit) {
+    const was = RT.isDone(hit[0], i.done, i.au);
+    const s = rt().mark(hit[0], true), a = info();
+    return afterMark(s, a, was);
+  }
+  if (generic) {
+    const s = i.week.steps[0] || i.next[0]; if (!s) return routeReply(E);
+    return { t: J('¡Bien' + (nm() ? ', ' + nm() : '') + '! ¿Te refieres a **«' + s.t + '»**?', 'Si es ese, lo marco como hecho y paso al siguiente.'), acts: [{ l: 'Sí, marcar como hecho', fn: 'rtMark', id: s.id }].concat(s.mod ? [ac('Abrir ' + MODN[s.mod], s.mod)] : []), qr: ['Mi ruta paso a paso', '¿Qué toca hoy?'], id: 'done' };
+  }
+  return null;
+}
+/** Texto tras marcar un paso (lo usan la conversación y el botón «Marcar como hecho»). */
+function afterMark(s, a, was) {
+  a = a || info(); if (!s || !a) return null;
+  if (was) return { t: 'Ese paso ya estaba hecho. Tu ruta va por el **' + a.prog.pct + ' %**.', qr: ['¿Qué toca hoy?', 'Mi ruta paso a paso'], id: 'done' };
+  const nx = a.finished ? null : (a.week.steps[0] || a.next[0]);
+  return { t: J('**¡Hecho' + (nm() ? ', ' + nm() : '') + '!** He marcado «' + lcf(s.t) + '». Llevas **' + a.prog.pct + ' %** de tu ruta (' + a.prog.n + ' de ' + a.prog.total + ' pasos).',
+    nx ? '**Siguiente:** ' + nx.t + ' (≈ ' + hrs(nx.h) + (nx.mod ? ' · ' + MODN[nx.mod] : '') + ').' : '**Has completado tu ruta.** Abre el Panel y decide con tus datos: seguir, ajustar o parar.', a.week.n && !a.finished ? 'Semana ' + a.week.n + ' de ' + a.R.nWeeks + '.' : ''), acts: nx ? stepActs(nx) : [ac('Abrir el Panel', 'panel')], qr: ['¿Qué toca hoy?', 'Mi ruta paso a paso', 'Ajustar mi ruta'], id: 'done' };
+}
+function quitReply() {
+  const m = me(), n = nm();
+  if (m.occ === 'emp') return { t: J('**Dejar el empleo es una decisión grande' + (n ? ', ' + n : '') + ', y no hace falta tomarla ahora.** Es la más cara y la menos reversible; lo habitual es validar en paralelo y decidir con datos.', B(['**Valida en paralelo:** tu ruta usa ' + (hoursTxt() || 'tus horas libres') + ', sin tocar tu sueldo.', '**Señales para plantearlo:** clientes que pagan de forma repetida, ingresos que cubran tus gastos y ahorros de 3 a 6 meses.', '**Revisa tu contrato** (pluriempleo, no competencia) antes de facturar.']), 'Es orientación general, no asesoramiento legal ni financiero; la decisión es tuya.'), acts: has() ? [ac('Ver mi ruta', 'hub')] : [], qr: ['Mi ruta paso a paso', '¿Cuánto cuesta arrancar?', '¿Autónomo o sociedad?'], id: 'quit' };
+  if (m.occ === 'est') return { t: J('**Antes de dejar los estudios' + (n ? ', ' + n : '') + ', prueba compaginarlos.** Validar una idea cuesta pocas horas a la semana y puedes hacerlo sin renunciar a nada.', B(['Tu ruta se ajusta a tus exámenes: en esas semanas baja a 1 bloque.', 'Decide con datos: clientes que pagan, no con la ilusión del momento.', 'Habla con tu familia o tu tutor/a antes de una decisión así.']), 'Es orientación general, no asesoramiento personal.'), qr: ['Mi ruta paso a paso', '¿Qué toca hoy?'], id: 'quit' };
+  return { t: J('**Cualquier salto grande, mejor con datos' + (n ? ', ' + n : '') + '.** Antes de dejar nada, comprueba que hay demanda y que tus ingresos cubren tus gastos.', B(['Valida con la prueba mínima: landing + 30 respuestas.', 'Ahorra de 3 a 6 meses de gastos antes de dar el salto.', 'Pon por escrito el número a partir del cual decidirías.']), 'Es orientación general, no asesoramiento financiero.'), qr: ['Mi ruta paso a paso', '¿Merece la pena seguir?'], id: 'quit' };
+}
+function stuckReply() {
+  const s = stepNow(), n = nm();
+  if (!s && !has()) return { t: J('**Pasa' + (n ? ', ' + n : '') + ', y no es un fallo tuyo.** Casi siempre es que el siguiente paso es demasiado grande.', 'Elige una sola tarea de 10 minutos (por ejemplo, escribir tu idea en una frase) y empieza por ella.', 'Si quieres, te preparo una **ruta paso a paso** que cabe en tu semana.'), acts: [{ l: 'Preparar mi ruta', fn: 'profile' }], qr: ['Definir mi proyecto paso a paso', '¿Qué es ValidLance?'], id: 'stuck' };
+  return { t: J('**Pasa' + (n ? ', ' + n : '') + ', y no es un fallo tuyo.** Tu ruta se mide en pasos, no en días: se desplaza, no se pierde.', s ? 'Hazlo pequeño. Versión de 10 minutos de «' + lcf(s.t) + '»: ' + lcf(MICRO[s.id] || s.t) + '.' : 'Elige una sola tarea de 10 minutos y empieza por ella.', 'Si falta tiempo de verdad, dímelo («ahora tengo 3 horas a la semana») y reajusto la ruta a lo que sí puedes.'), acts: stepActs(s), qr: ['Ajustar mi ruta', '¿Qué toca hoy?', 'Mi ruta paso a paso'], id: 'stuck' };
+}
+function tuneReply() {
+  if (!has()) return noProfile('no puedo ajustar una ruta que aún no existe');
+  const i = info(), n = nm();
+  const opts = ['**Más tiempo:** dime cuántas horas tienes («ahora tengo 12 horas a la semana»).', '**Prueba mínima:** quédate con landing + 30 respuestas y decide con eso.', '**Menos frentes:** deja trámites y lanzamiento para cuando haya demanda.'];
+  return { t: J((n ? n + ', ' : '') + 'puedo ajustar tu ruta' + (i ? ' (ahora son ≈ ' + i.R.nWeeks + ' semanas con ' + hoursTxt() + ')' : '') + ' de tres formas:', B(opts), 'Dime cuál prefieres o cuéntame qué ha cambiado.'), qr: ['Ahora tengo 12 horas a la semana', 'Solo tengo 3 horas a la semana', 'No tengo presupuesto', 'Mi ruta paso a paso'], id: 'tune' };
+}
+const PREM = [
+  [/(logo|logotipo|marca|identidad|nombre comercial|branding)/, 'el logo y la marca', 'Un logo no demuestra que alguien pague. Con un nombre provisional y texto plano vale para validar.'],
+  [/(dominio|hosting|web completa|pagina web completa|tienda online completa|desarrollar la app|programar la app|crear la app|app completa)/, 'la web o app completa', 'Construir antes de validar es la forma más cara de equivocarse. Una landing de una página y una lista de espera bastan.'],
+  [/(contrat|empleado|equipo de|fichar a|oficina|local comercial|alquilar un local)/, 'contratar o alquilar', 'Los costes fijos te quitan margen de error. Primero clientes que pagan; después, equipo.'],
+  [/(constituir|crear (una )?(sl|sociedad|empresa)|montar (una )?(sl|sociedad|empresa)|registrar la marca|darme de alta como)/, 'constituir la empresa', 'Los trámites importan, pero no antes de saber si hay demanda. En Lanza tienes costes y plazos para cuando toque.'],
+  [/(comprar (stock|inventario|mercancia|producto)|stock|inventario|lote grande|pedido grande|fabricar)/, 'comprar stock', 'Con producto físico, pide muestras o un lote mínimo y vende primero (preventa). No inmovilices dinero sin una venta.'],
+  [/(invertir (en )?(publicidad|anuncios)|gastar en (publicidad|anuncios)|facebook ads|meta ads|google ads|campana de pago|campana grande)/, 'invertir en anuncios', 'Los anuncios amplifican lo que ya funciona. Antes, mide con tu círculo y comunidades; luego prueba con un tope pequeño.'],
+  [/(grabar (todo )?el curso|curso completo|producir el curso|escribir el libro)/, 'producir el curso completo', 'Valida con una sesión piloto gratuita y una preventa antes de grabar todo.'],
+];
+function planReply(X) {
+  const n = X.n; if (!/(voy a|quiero|pienso|primero|empezar por|empiezo por|me gustaria|tengo pensado|mi plan es|planeo)/.test(n)) return null;
+  const p = PREM.find((q) => q[0].test(n)); if (!p) return null;
+  const i = info(), s = stepNow();
+  const cap = me().cap === 'c0' ? ' Y sin presupuesto, mejor aún: cada euro cuenta.' : '';
+  return { t: J('**' + (nm() ? nm() + ', todavía no' : 'Todavía no') + ': ' + p[1] + ' puede esperar.**', p[2] + cap, s ? 'Tu siguiente paso es otro: ' + lcf(s.t) + ' (≈ ' + hrs(s.h) + ').' : 'Valida primero: landing + 30 respuestas y decides con datos.', 'Si ves algo que yo no, cuéntamelo y lo revisamos: el plan es tuyo y yo te lo discuto con datos.'), acts: s ? stepActs(s) : [], qr: ['Mi ruta paso a paso', '¿Cómo valido mi idea sin gastar?', 'Ajustar mi ruta'], id: 'plan-check' };
+}
+
+// ---------- bienvenida personalizada ----------
+/** Frase de saludo con el nombre para el chat (primera vez / vuelta). */
+function welcome(back) {
+  const n = nm(); if (!n) return back ? '**¡Hola de nuevo! Soy Astro.**' : '**¡Bienvenido a ValidLance! Soy Astro**, tu mentor y consultor personal.';
+  return back ? '**¡Hola de nuevo, ' + n + '! Soy Astro.**' : '**¡Hola, ' + n + '! Soy Astro**, tu mentor y consultor personal.';
+}
+/** Resumen para el primer mensaje del chat tras el onboarding. */
+function intro() {
+  if (!has()) return '';
+  const i = info(), pl = profileLine();
+  return J(pl ? 'Con lo que me has contado (' + pl + ') ' + (i ? 'te he preparado una **ruta de ≈ ' + i.R.nWeeks + ' semanas** que cabe en tu tiempo.' : 'adapto el ritmo a tu situación.') : '', i ? 'La verás en el Centro de control, en «Tu ruta», en cuanto elijas tu modelo.' : '');
+}
+function line() { return profileLine(); }
+
+// ---------- lo que se envía al servidor de IA (solo con «IA con tu proyecto» activada) ----------
+function ragProfile() {
+  if (!has()) return null; const m = me(), L = RT.label;
+  return {
+    nombre: nm() || undefined, situacion: L('occ', m.occ) || undefined, recursos: (m.res || []).map((x) => L('res', x)).filter(Boolean), objetivo: L('goal', m.goal) || undefined, objetivo_texto: m.goalTxt || undefined,
+    horas_semana: m.hours || undefined, franjas: (m.when || []).map((x) => WLAB[x]).filter(Boolean), presupuesto: capTxt() || undefined,
+  };
+}
+function ragRoute() {
+  const i = info(); if (!i) return null;
+  return { semanas_total: i.R.nWeeks, semana_actual: i.week.n || null, avance_pct: i.prog.pct, pasos_hechos: i.prog.n, pasos_total: i.prog.total, pasos_esta_semana: i.week.steps.map((s) => s.t).slice(0, 4), siguiente_paso: (i.next[0] && i.next[0].t) || null, notas: (i.R.notes || []).slice(0, 3).map((n) => String(n).replace(/\*\*/g, '')) };
+}
+
+/** ¿Contiene el texto un cambio de perfil que se pueda entender (horas, dinero, empleo…)? */
+function adjustHas(n) { try { return !!RT.parse(n); } catch (e) { return false; } }
+LV.coach = { adjustHas: adjustHas, nm: nm, has: has, decorate: decorate, invite: invite, opener: opener, nextReply: nextReply, routeReply: routeReply, todayReply: todayReply, adjustReply: adjustReply, doneReply: doneReply, afterMark: afterMark, meReply: meReply, nameReply: nameReply, nameFrom: nameFrom, quitReply: quitReply, stuckReply: stuckReply, planReply: planReply, tuneReply: tuneReply, welcome: welcome, intro: intro, ragProfile: ragProfile, ragRoute: ragRoute, line: line, resetCadence: function () { cad.n = 0; cad.last = -99; invited = 0; } };
 })();
 
 /* ============================================================
@@ -9736,7 +12660,7 @@ if (typeof LV !== 'undefined') LV.agentExplain = API;
 'use strict';
 const { $, $$, esc, ic, clamp, pc } = LV;
 const S = LV.state;
-const NLU = LV.nlu, K = LV.agentKB, EX = LV.agentExplain, AX = LV.astra, TIPS = LV.agentTips;
+const NLU = LV.nlu, K = LV.agentKB, EX = LV.agentExplain, AX = LV.astra, TIPS = LV.agentTips, MI = LV.intel, MEM = LV.mem;
 const life = AX && AX.life ? AX.life : null; // presencia viva: vuelo, orbe, deriva, reacciones y polvo estelar (astra_life.js)
 const NAME = 'Astro', FAB_L = 'Abrir el chat con Astro, tu mentor de ValidLance';
 const root = $('#cp');
@@ -9744,16 +12668,19 @@ const appEl = $('#app');
 const noop = function () {};
 if (!root || (appEl && appEl.classList.contains('solo'))) { // las versiones independientes no llevan asistente
   if (root) root.remove();
-  LV.agent = { open: noop, close: noop, toggle: noop, ask: noop, say: noop, reset: noop, ctx: () => '', ready: noop, boot: noop, explain: noop, setProvider: noop, on: false, name: NAME };
+  LV.agent = { talk: noop, onboarded: noop, open: noop, close: noop, toggle: noop, ask: noop, say: noop, reset: noop, ctx: () => '', ready: noop, boot: noop, explain: noop, setProvider: noop, setRag: noop, sayAs: noop, refreshCtx: noop, on: false, name: NAME, ideaText: () => '' };
   return;
 }
 
 const fab = $('#cp-fab'), panel = $('#cp-panel'), log = $('#cp-log'), qrEl = $('#cp-qr'), inp = $('#cp-in'), form = $('#cp-form'), send = $('#cp-send');
+const noteEl = $('#cp-note-t'), NOTE0 = noteEl ? noteEl.textContent : '';
 const tease = $('#cp-tease'), tz = $('#cp-tz'), ctxEl = $('#cp-ctx'), stEl = $('#cp-st'), hd = $('#cp-hd'), grab = $('#cp-grab');
 const pres = $('#cp-pres'), presK = $('#cp-pres-k'), presT = $('#cp-pres-t'), presC = $('#cp-pres-c'), presA = $('#cp-pres-a'), presV = $('#cp-pres-v'), noteT = $('#cp-note-t');
 const KEY = 'lv_agent_v1', MAX = 40;
+const RAG_NOTE = 'Con «IA con tu proyecto» activada, lo que escribes a mano en este chat se envía a tu servidor, que usa un modelo de lenguaje. Botones, sugerencias y cálculos siguen en tu navegador.';
 // st.d = estado del diálogo: flow (guía en curso), step, slots (respuestas), pend (pregunta abierta), last (último tema), miss (huecos por rellenar)
-const st = { open: false, busy: false, ready: false, k: '', msgs: [], g: {}, mute: 0, qr: [], typ: null, teaseT: 0, showT: 0, flush: null, gT: 0, gSig: '', noGate: 0, gc: {}, wel: 0, noAuto: 0, provider: null, ps: {}, gs: {}, pk: '', pT: 0, nopres: 0, away: 0, introMsg: 0, idea: '', d: { flow: '', step: '', slots: {}, pend: null, last: null, miss: [] } };
+const st = { open: false, busy: false, ready: false, k: '', msgs: [], g: {}, mute: 0, qr: [], typ: null, teaseT: 0, showT: 0, flush: null, gT: 0, gSig: '', noGate: 0, gc: {}, wel: 0, noAuto: 0, provider: null, rag: null, mem: MEM.empty(), ps: {}, gs: {}, pk: '', pT: 0, nopres: 0, away: 0, introMsg: 0, idea: '', d: { flow: '', step: '', slots: {}, pend: null, last: null, miss: [] } };
+const ragOn = () => !!(st.rag && st.rag.on());
 let lastCard = '';
 
 // ---------- utilidades ----------
@@ -9762,7 +12689,7 @@ const isSheet = () => { try { return matchMedia('(max-width: 640px)').matches; }
 const nz = NLU.nz;
 const J = function () { return Array.prototype.filter.call(arguments, Boolean).join('\n\n'); };
 const B = (a) => a.map((x) => '- ' + x).join('\n');
-const inl = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
+const inl = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/\[([^\]]{1,200})\]\((https:\/\/[^\s)"<>]{4,400})\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'); // enlaces: solo https y solo con el formato [texto](url)
 const lc = (s) => { s = String(s || ''); return s.charAt(0).toLowerCase() + s.slice(1); };
 const capf = (s) => { s = String(s || ''); return s.charAt(0).toUpperCase() + s.slice(1); };
 const eur = (v) => LV.eur(v);
@@ -9783,8 +12710,8 @@ function rich(t) {
 }
 
 // ---------- contexto: módulo, subárea y modelo ----------
-const MODS = { panel: 'Panel', valida: 'Valida', compite: 'Compite', lanza: 'Lanza', genera: 'Genera' };
-const MICON = { modelo: 'swap', panel: 'home', valida: 'valida', compite: 'compite', lanza: 'lanza', genera: 'genera' };
+const MODS = { hub: 'Centro de control', panel: 'Panel', valida: 'Valida', compite: 'Compite', lanza: 'Lanza', genera: 'Genera' };
+const MICON = { modelo: 'swap', hub: 'hub', panel: 'home', valida: 'valida', compite: 'compite', lanza: 'lanza', genera: 'genera' };
 const SUBN = { competencia: 'Competencia', precios: 'Precios y público', riesgos: 'Riesgos y estrategia', plan: 'Plan de acción', mercado: 'Mercado', datos: 'Datos' };
 const CARDSUB = { eco: 'competencia', est: 'precios', chain: 'riesgos', plan: 'plan', src: 'datos' };
 const view = () => (LV.model && LV.model.gateOpen() ? 'modelo' : (S.view || 'panel'));
@@ -9797,9 +12724,13 @@ function lab() { const k = mk(); if (!k) return ''; if (k === 'otro') { const c 
 function fam() { const k = mk(); if (k === 'otro') return LV.model.engine() || 'gen'; return k || 'gen'; }
 const ctxKey = () => view() + '|' + mk();
 function facts() { try { const VE = window.ValidEst; return (VE && VE.data.MODELS.find((x) => x.id === fam())) || null; } catch (e) { return null; } }
+const coachWel = (back) => { try { return LV.coach ? LV.coach.welcome(back) : (back ? '**¡Hola de nuevo! Soy Astro.**' : '**¡Bienvenido a ValidLance! Soy Astro**, tu mentor y consultor personal.'); } catch (e) { return ''; } };
+const coachIntro = () => { try { return LV.coach ? LV.coach.intro() : ''; } catch (e) { return ''; } };
+const coachNm = () => { try { return LV.coach ? LV.coach.nm() : ''; } catch (e) { return ''; } };
+const coachHas = () => { try { return !!(LV.coach && LV.coach.has()); } catch (e) { return false; } };
 function env() {
   const m = LV.metrics();
-  return { v: view(), sub: sub(), k: mk(), fam: fam(), lab: lab(), full: full(), p: LV.mp(), m: m, pr: LV.progress(), idea: LV.hasIdea(), name: S.idea.name.trim(), ran: !!S.compite.ran, data: LV.hasData(), vd: LV.verdict(m), f: facts() };
+  return { v: view(), sub: sub(), k: mk(), fam: fam(), lab: lab(), full: full(), p: LV.mp(), m: m, pr: LV.progress(), idea: LV.hasIdea(), name: S.idea.name.trim(), ran: !!S.compite.ran, data: LV.hasData(), vd: LV.verdict(m), f: facts(), nm: coachNm(), me: coachHas() };
 }
 /** Datos del informe de Compite ya formateados (null si aún no hay análisis). */
 function digest() {
@@ -9824,19 +12755,31 @@ const snip = (t, n) => { t = String(t || '').replace(/\s+/g, ' ').trim(); return
 
 // ---------- sugerencias (píldoras de respuesta rápida) ----------
 const Q = {
+  radar: '¿Cómo está mi sector?', vs: '¿Cómo voy frente al mercado?', trend: '¿Qué tendencias hay?', wins: '¿Qué hacen los que triunfan?', fail: '¿Por qué fracasan?', kpis: '¿Qué métricas debo seguir?', strat: 'Hazme un diagnóstico estratégico',
   next: '¿Qué me falta?', start: '¿Por dónde empiezo?', prog: '¿Cómo voy?', what: '¿Qué cambia con mi modelo?', ph: 'Explícame las 4 fases', crit: '¿Cómo leo los criterios?', n: '¿Cuántas encuestas necesito?', h1: 'Mejorar mi titular', res: '¿Cómo anoto mis resultados?', mine: 'Definir mi proyecto paso a paso',
   price: '¿Cómo defino mi precio?', aud: 'Afinar mi público', comp: '¿Cómo me diferencio?', cost: '¿Cuántos clientes necesito?', risk: '¿Qué riesgos miro primero?', plan: '¿Cómo uso el plan de acción?', tram: '¿Qué trámite hago primero?', soc: '¿Autónomo o sociedad?', arr: '¿Cuánto cuesta arrancar?',
   lz: 'Explícame el paso de mi modelo', cta: 'Un botón que convierta', chk: 'Checklist de conversión', enc: '¿Qué pongo en la encuesta?', wr: '¿Qué escribo aquí?',
   explain: 'Explicar estos datos de forma sencilla', tam: 'Explícame el TAM, SAM y SOM', rivals: 'Explícame a mis rivales', first: '¿Qué hago primero?', risks: 'Explícame los riesgos', cac: '¿Qué es el coste por cliente?', be: '¿Qué es el punto de equilibrio?', ads: 'Explícame el coste de captar clientes', trust: '¿Cuánto me fío de estas cifras?',
+  today: '¿Qué toca hoy?', route: 'Mi ruta paso a paso', week: '¿Qué toca esta semana?', adj: 'Ajustar mi ruta', profile: 'Contarle mi situación a Astro', who2: '¿Qué sabes de mí?', done: 'Ya lo hice', stuck: 'Estoy atascado',
   lost: 'No sé por dónde empezar', disc: 'Ayúdame a concretar mi idea', appwhat: '¿Qué es ValidLance?', tour: 'Ver la presentación de ValidLance', apphow: '¿Cómo funciona ValidLance?', mods: '¿Qué aporta cada módulo?', cmpread: '¿Cómo interpreto los datos de competencia?', land: '¿Cómo genero mi landing?', chan: '¿Cómo consigo mis primeros clientes?', val: '¿Cómo valido mi idea sin gastar?', exit: 'Salir de la guía', myidea: 'Quiero que analices mi idea', improve: '¿Cómo mejoro la viabilidad?', whoami: '¿Quién eres?',
 };
 const GATE_Q = ['Cobraría una suscripción por un software', 'Ofrezco servicios como freelance', 'Vendo productos en una tienda online', 'Vendo cursos o una comunidad de pago', 'Quiero hacer trading o vender señales'];
 const asked = () => st.msgs.some((m) => m.r === 'u' && m.k === ctxKey());
+/** Sugerencias de la ruta personal: con perfil, «qué toca hoy» y «mi ruta»; sin perfil, una invitación a contarlo. */
+function withMe(E, a) {
+  if (E.v !== 'hub' && E.v !== 'panel') return a;
+  if (E.me) return [Q.today, Q.route].concat(a.filter((x) => x !== Q.start && x !== Q.what)).slice(0, 5);
+  return a.slice(0, 4).concat([Q.profile]);
+}
 function defaults(E) {
   E = E || env();
   if (st.d.flow) return [Q.exit];
+  return withMe(E, defaults0(E));
+}
+function defaults0(E) {
   switch (E.v) {
     case 'modelo': return E.k || asked() ? ['¿Cuál me conviene?', 'Tengo un modelo mixto', '¿Qué cambia al elegir?', Q.disc, '¿Puedo cambiarlo después?'] : [Q.lost, Q.tour, Q.appwhat].concat(GATE_Q);
+    case 'hub': return E.idea || E.ran ? [Q.start, Q.prog, Q.mods, Q.what] : [Q.start, Q.mods, Q.myidea, Q.what];
     case 'panel': return E.idea ? [Q.next, Q.prog, Q.what, Q.ph] : [Q.mine, Q.start, Q.apphow, Q.what];
     case 'valida': return E.idea ? [Q.crit, Q.n, Q.h1, Q.res] : [Q.mine, Q.crit, Q.n, Q.res];
     case 'compite':
@@ -9845,7 +12788,7 @@ function defaults(E) {
       if (E.sub === 'competencia') return [Q.explain, Q.rivals, Q.comp, Q.price];
       if (E.sub === 'riesgos') return [Q.explain, Q.risks, Q.comp, Q.plan];
       if (E.sub === 'plan') return [Q.explain, Q.plan, Q.first, { l: 'Ir a Lanza', go: 'lanza' }];
-      return [Q.explain, Q.tam, Q.rivals, Q.ads];
+      return [Q.explain, Q.vs, Q.rivals, Q.ads];
     case 'lanza': return S.lanza.biz ? [Q.tram, Q.soc, Q.arr, Q.lz] : [Q.soc, Q.tram, Q.arr];
     case 'genera': return LV.landReady() ? [Q.h1, Q.cta, Q.chk, Q.enc] : [Q.mine, Q.h1, Q.cta, Q.chk];
     default: return [Q.start, Q.prog];
@@ -9855,12 +12798,12 @@ function defaults(E) {
 // ---------- pasos y estado del proyecto ----------
 function nextCheck() { try { return LV.checks().find((c) => c.frac < 1) || null; } catch (e) { return null; } }
 function stateLine(E) {
-  if (!E.data) return 'Aún no has anotado resultados reales: cuando publiques tu landing y lleguen respuestas, **anótalas en Valida** («Resultados de tu validación»). Yo nunca invento cifras.';
+  if (!E.data) return 'Aún no hay resultados reales. Publica tu landing, **anota las respuestas en Valida** y te digo si hay demanda. Yo no invento cifras.';
   const v = E.vd; return 'Veredicto actual: **' + v.label + '** (' + v.ok + ' de ' + v.total + ' criterios). ' + v.text;
 }
 function factsLines(E) {
   const f = E.f; if (!f) return '';
-  return J('Según el módulo **Precio, público y posicionamiento**, en tu modelo:', B(['De dónde sale el dinero: ' + f.earn + '.', 'Lo que manda: ' + f.key + '.', 'Orientación: ' + f.typ + '.']), 'Cada cifra de ese módulo indica si es publicada o estimada y su fuente.');
+  return J('En tu modelo, así funciona el dinero:', B(['De dónde sale el dinero: ' + f.earn + '.', 'Lo que manda: ' + f.key + '.', 'Orientación: ' + f.typ + '.']), 'Cada cifra indica si es publicada o estimada, y su fuente.');
 }
 
 
@@ -9872,7 +12815,7 @@ function tourParts(E) {
     ? '**1 · Elige tu modelo de negocio** (lo que ves ahora). SaaS, Trading, Servicios, E-commerce, Infoproductos… Con él adapto el lenguaje, las métricas y los análisis de toda la app. **La eliges tú**; yo te comento cada opción.'
     : '**1 · Tu modelo de negocio.** Ahora trabajas con **' + (E.lab || 'tu modelo') + '**: adapta el lenguaje, las métricas y los análisis de toda la app. Puedes cambiarlo cuando quieras desde la cabecera.';
   return [
-    { t: J('**¡Bienvenido a ValidLance! Soy Astro**, tu mentor y consultor personal.', 'Estoy aquí para que compruebes tu idea de negocio **antes de gastar dinero**. ValidLance **empieza en blanco**: no hay proyectos ni datos de ejemplo, lo vas definiendo tú, paso a paso, y yo te acompaño. Te presento mi tarjeta y te explico cómo funciona todo.') },
+    { t: J(coachWel(false), coachIntro(), 'Estoy aquí para que compruebes tu idea de negocio **antes de gastar dinero**. ValidLance **empieza en blanco**: no hay proyectos ni datos de ejemplo, lo vas definiendo tú, paso a paso, y yo te acompaño. Te presento mi tarjeta y te explico cómo funciona todo.') },
     cardPart(),
     { t: J('**Así funciona ValidLance:**', B([
       m1,
@@ -9893,7 +12836,7 @@ function tour(E) {
 function autoGreet(E) {
   const W = (WEL[E.v] || WEL.panel)(E, true); st.gs[presKey(E)] = 1;
   const last = st.msgs[st.msgs.length - 1]; if (last && last.wb) dropLast(); // sin acumular saludos de sesiones anteriores
-  push({ r: 'a', t: J('**¡Hola de nuevo! Soy Astro.**', W.t), acts: (W.acts || []).concat([{ l: 'No abrir al iniciar', fn: 'autoOff' }]).slice(0, 3), wb: 1 });
+  push({ r: 'a', t: J(coachWel(true), W.t), acts: (W.acts || []).concat([{ l: 'No abrir al iniciar', fn: 'autoOff' }]).slice(0, 3), wb: 1 });
   setQR(W.qr || defaults(E));
 }
 /** Se despliega solo al terminar la pantalla de inicio. */
@@ -9904,22 +12847,31 @@ function autoOpen() {
   if (first) tour(E); else autoGreet(E);
 }
 
+// ---------- centro de control: Astro sugiere por dónde empezar ----------
+/** Recomendación del centro de control según lo que la persona ha contado y lo que ya ha hecho (null si el módulo no está). */
+function hubRec() { try { return LV.hub ? LV.hub.recommend(ideaText()) : null; } catch (e) { return null; } }
+/** Botón de chat que lleva directo al módulo recomendado (y a su tarjeta, si el informe ya existe). */
+function hubAct(r) { return r ? (r.card && r.to === 'compite' && S.compite.ran ? ac('Abrir ' + r.title.toLowerCase(), { nav: r.card }) : ac('Ir a ' + r.title.toLowerCase(), r.to)) : null; }
 // ---------- bienvenidas por módulo ----------
 const ac = (l, go) => (typeof go === 'string' ? { l: l, go: go } : Object.assign({ l: l }, go));
 const WEL = {
   modelo(E, back) {
-    if (!E.k) return { t: J(back ? '' : '**Hola, soy Astro, tu mentor en ValidLance.**', 'Elige el tipo de negocio que más se parezca al tuyo: con él adapto el lenguaje, las métricas y los análisis de toda la app. **La eliges tú.**', '**Toca una tarjeta** y te cuento cómo funciona ese modelo. Si dudas, **cuéntame tu idea** con tus palabras y te oriento, o dime «no sé por dónde empezar».') };
-    return { t: J('Vas a **cambiar de modelo**. Ahora trabajas con **' + E.lab + '**.', 'Tus datos se conservan; algunos análisis, como el de Compite, pueden pedirte repetirlos con el nuevo modelo.') };
+    if (!E.k) return { t: J(back ? '' : '**Hola, soy Astro, tu mentor en ValidLance.**', '**Elige el tipo de negocio que más se parezca al tuyo.** Adapto lenguaje, métricas y análisis a él. **Decides tú.**', '**Toca una tarjeta** y te cuento cómo funciona. ¿Dudas? **Cuéntame tu idea** o dime «no sé por dónde empezar».') };
+    return { t: J('Vas a **cambiar de modelo**. Ahora trabajas con **' + E.lab + '**.', 'Tus datos se conservan. Algunos análisis, como el de Compite, pueden pedirte repetirlos.') };
+  },
+  hub(E, back) {
+    const r = hubRec(), a = hubAct(r);
+    return { t: J(back ? '' : '**¡Listo, trabajamos con ' + (E.lab || 'tu modelo') + '!** Este es tu **Centro de control**.', 'Cada módulo, a un toque: competencia, precio y público, landing, validación y trámites. **Todo empieza en blanco:** lo que veas lo escribes tú.', r ? '**Mi sugerencia:** empieza por **' + r.title + '**. ' + r.why : ''), acts: a ? [a] : [], qr: defaults(E) };
   },
   panel(E) {
     const c = nextCheck();
     const dr = st.idea && !E.idea ? [ac('Llevar mi borrador a Compite', { fn: 'useDraft' })] : [];
-    if (!E.idea) return { t: J('**Has elegido ' + E.lab + '. Ahora toca definir TU proyecto, paso a paso.**', 'ValidLance empieza en blanco: no hay ningún proyecto ni dato de ejemplo, así que todo lo que veas será tuyo.', B(['**Paso 1:** qué ofreces y a quién.', '**Paso 2:** cómo ganarás dinero y cuánto cobrarías.', '**Paso 3:** con cuánto dinero y tiempo cuentas.', '**Paso 4:** cómo llegarás a tus primeros clientes.']), st.idea ? 'Tienes un **borrador de idea** guardado: puedo llevarlo a Compite por ti.' : '¿Empezamos por el paso 1? Te hago las preguntas una a una, o la escribes tú de golpe en Compite.'), acts: dr.concat([ac('Empezar paso a paso', { q: Q.disc }), ac('Escribirla yo en Compite', 'compite')]).slice(0, 3), qr: [Q.mine, Q.start, Q.apphow, Q.what] };
-    return { t: J('**' + E.name + '** · ' + LV.phaseText() + ' · progreso **' + E.pr.total + ' %**.', c ? 'Siguiente paso recomendado: **' + c.label + '** (en ' + MODS[c.m] + ').' : 'Has completado todos los pasos. Revisa el veredicto y decide si lanzas.'), acts: c ? [ac('Ir a ' + MODS[c.m], c.m)] : [] };
+    if (!E.idea) return { t: J('**Has elegido ' + E.lab + '. Ahora toca definir TU proyecto, paso a paso.**', 'Empezamos en blanco: sin proyectos ni datos de ejemplo. Todo lo que veas será tuyo.', B(['**Paso 1:** qué ofreces y a quién.', '**Paso 2:** cómo ganarás dinero y cuánto cobrarías.', '**Paso 3:** con cuánto dinero y tiempo cuentas.', '**Paso 4:** cómo llegarás a tus primeros clientes.']), st.idea ? 'Tienes un **borrador de idea** guardado: puedo llevarlo a Compite por ti.' : '**Siguiente paso:** el paso 1. Te hago las preguntas una a una, o la escribes de golpe en Compite.'), acts: dr.concat([ac('Empezar paso a paso', { q: Q.disc }), ac('Escribirla yo en Compite', 'compite')]).slice(0, 3), qr: [Q.mine, Q.start, Q.apphow, Q.what] };
+    return { t: J('**' + E.name + '** · ' + LV.phaseText() + ' · progreso **' + E.pr.total + ' %**.', c ? '**Siguiente paso:** ' + c.label + ' (en ' + MODS[c.m] + ').' : 'Has completado todos los pasos. Revisa el veredicto y decide si lanzas.'), acts: c ? [ac('Ir a ' + MODS[c.m], c.m)] : [] };
   },
   valida(E) {
     const k = E.p.k;
-    if (!LV.landReady()) return { t: J('Estás en **Valida**, con el modelo **' + E.lab + '**.', 'Aún no hay landing ni encuesta: se escriben a partir de **tu idea**, y no hay ejemplos de relleno. Cuéntame qué ofreces y a quién (paso 1) y las preparamos juntos.'), acts: [ac('Definir mi idea paso a paso', { q: Q.disc })] };
+    if (!LV.landReady()) return { t: J('Estás en **Valida**, con el modelo **' + E.lab + '**.', 'Aún no hay landing ni encuesta: salen de **tu idea**. Cuéntame qué ofreces y a quién (paso 1) y las preparamos.'), acts: [ac('Definir mi idea paso a paso', { q: Q.disc })] };
     return { t: J('Estás en **Valida**, con el modelo **' + E.lab + '**. Aquí publicas la landing y la encuesta y mides ' + k[0].toLowerCase() + ', ' + k[1].toLowerCase() + ' y ' + k[2].toLowerCase() + '.', stateLine(E)) };
   },
   compite(E) {
@@ -9927,8 +12879,8 @@ const WEL = {
     if (E.sub === 'competencia') return { t: J('Estás en **Competidores y huecos**. Mira quién ocupa el mercado y dónde puedes diferenciarte.', 'Marca como prioritarias las recomendaciones que quieras ejecutar primero.'), acts: [ac(Q.explain, { explain: 1 })] };
     if (E.sub === 'riesgos') return { t: J('Estás en **Riesgos y estrategia**. Cada riesgo se enlaza con una estrategia y una acción concreta.', 'Empieza por el que más afecte a tu primer cliente.'), acts: [ac(Q.explain, { explain: 1 })] };
     if (E.sub === 'plan') return { t: J('Estás en el **Plan de acción**: fases y hitos con semanas orientativas.', 'Marca los hitos al completarlos para seguir tu avance.'), acts: [ac(Q.explain, { explain: 1 })] };
-    if (E.ran) return { t: J('Tu análisis de **' + LV.sector().label + '** está listo, con el modelo **' + E.lab + '**.', 'Hay muchas cifras: puedo **explicártelas en lenguaje sencillo**, con lo que significan para tu proyecto, o ayudarte a priorizar riesgos, revisar tu precio o preparar el plan.'), acts: [ac(Q.explain, { explain: 1 })] };
-    return { t: J('Estás en **Compite**, con el modelo **' + E.lab + '**.', 'Describe tu idea con tus palabras: qué vendes, cuánto cobrarías, tu presupuesto y cómo llegarás a la gente. Con eso genero el informe de mercado, competencia, precio, riesgos y plan.', st.idea ? 'Tienes un **borrador de idea** del chat: puedo ponerlo aquí por ti.' : 'Si no sabes cómo contarla, te guío con unas preguntas.'), acts: st.idea ? [ac('Usar mi borrador de idea', { fn: 'useDraft' })] : [ac(Q.disc, { q: Q.disc })] };
+    if (E.ran) return { t: J('Tu análisis de **' + LV.sector().label + '** está listo, con el modelo **' + E.lab + '**.', 'Hay muchas cifras: te las **explico en lenguaje sencillo**, o priorizamos riesgos, revisamos tu precio o preparamos el plan.'), acts: [ac(Q.explain, { explain: 1 })] };
+    return { t: J('Estás en **Compite**, con el modelo **' + E.lab + '**.', 'Cuéntame tu idea: qué vendes, cuánto cobrarías, tu presupuesto y cómo llegarás a la gente. Con eso genero mercado, competencia, precio, riesgos y plan.', st.idea ? 'Tienes un **borrador de idea** del chat: puedo ponerlo aquí por ti.' : 'Si no sabes cómo contarla, te guío con unas preguntas.'), acts: st.idea ? [ac('Usar mi borrador de idea', { fn: 'useDraft' })] : [ac(Q.disc, { q: Q.disc })] };
   },
   lanza(E) {
     let s = { done: 0, total: 0 }; try { s = LV.lanzaStats(); } catch (e) { /* sin datos */ }
@@ -9945,6 +12897,7 @@ const WEL = {
 function explainMod(v, E) {
   const k = E.p.k, T = LV.THR;
   if (v === 'modelo') return J(K.MODS.modelo.what, 'Puedes cambiarlo cuando quieras desde la insignia «Modelo activo» de la cabecera.');
+  if (v === 'hub' || v === 'centro de control') return J('El **Centro de control** reúne todos los módulos en un solo sitio: **competencia, precios y público, landing, validación y trámites**. Tocas una tarjeta y entras directo; no hay que seguir un orden, aunque te sugiero uno.');
   if (v === 'panel') return J('El **Panel** resume tu proyecto: progreso por fase, métricas (' + k.slice(0, 3).join(', ').toLowerCase() + '), veredicto Go / No-Go y los siguientes pasos.');
   if (v === 'valida') return J('**Valida** mide la demanda real con una landing y una encuesta. Con tu modelo, los mínimos orientativos son: ' + pc(T.conv, 0) + ' de visitas que se registran, ' + pc(T.hi, 0) + ' de intención alta, ' + pc(T.pay, 0) + ' que pagaría y al menos ' + T.n + ' respuestas.', 'Son referencias orientativas, no datos de mercado.');
   if (v === 'compite') return J('**Compite** convierte tu descripción en un informe: mercado (TAM, SAM y SOM), competencia, **precio y público**, riesgos y plan de acción. Con **' + (E.lab || 'tu modelo') + '** adapta el modelo de cobro y los ejemplos.');
@@ -9953,7 +12906,7 @@ function explainMod(v, E) {
   return '';
 }
 function phases(E) {
-  const p = E.pr; return J('ValidLance sigue **4 fases**:', B(['**Valida** (' + p.valida + ' %): mide la demanda con landing y encuesta.', '**Compite** (' + p.compite + ' %): mercado, competencia, precio y público.', '**Lanza** (' + p.lanza + ' %): trámites, costes y plazos.', '**Genera** (' + p.genera + ' %): la landing que sale al mercado.']), 'No hace falta ir en orden estricto, pero Valida y Compite te dicen si merece la pena seguir.');
+  const p = E.pr; return J('ValidLance sigue **4 fases**:', B(['**Valida** (' + p.valida + ' %): mide la demanda con landing y encuesta.', '**Compite** (' + p.compite + ' %): mercado, competencia, precio y público.', '**Lanza** (' + p.lanza + ' %): trámites, costes y plazos.', '**Genera** (' + p.genera + ' %): la landing que sale al mercado.']), 'Sin orden estricto, pero Valida y Compite te dicen si merece la pena seguir.');
 }
 /** Tarjeta de modelo que mejor encaja con un texto (null si no hay señal clara). */
 const CARDMAP = { saas: ['saas', 'SaaS / Aplicaciones Web'], trade: ['trade', 'Trading / Inversiones / Finanzas'], serv: ['serv', 'Servicios / Freelance / Consultoría'], shop: ['shop', 'E-Commerce / Producto Físico'], info: ['info', 'Infoproductos / Creadores de Contenido'], crea: ['info', 'Infoproductos / Creadores de Contenido'], colab: ['otro', 'Otro / Modelo Híbrido'], local: ['otro', 'Otro / Modelo Híbrido'], pers: ['otro', 'Otro / Modelo Híbrido'] };
@@ -9999,7 +12952,7 @@ function describeModel(k, E) {
   const G = K.GATE[k], P = LV.MP[k]; if (!G) return null;
   const note = k === 'trade' && P.note ? 'Importante: ' + P.note : '';
   const body = k === 'otro'
-    ? J('**' + G.t + '** — ' + G.one, 'Describe tu modelo con tus palabras y dime a cuál se parece más: el análisis partirá de ahí.', B(['**Cómo se gana dinero:** ' + G.earn + '.', '**Ojo con:** ' + G.risk + '.']), 'Te encaja si ' + G.fit + '. Si tu idea sí encaja en otra tarjeta, ' + G.notfit.replace(/^tu idea sí encaja en otra tarjeta: /, '') + '.')
+    ? J('**' + G.t + '** — ' + G.one, 'Cuéntame tu modelo con tus palabras y te digo a cuál se parece más.', B(['**Cómo se gana dinero:** ' + G.earn + '.', '**Ojo con:** ' + G.risk + '.']), 'Te encaja si ' + G.fit + '. Si tu idea sí encaja en otra tarjeta, ' + G.notfit.replace(/^tu idea sí encaja en otra tarjeta: /, '') + '.')
     : J('**' + G.t + '** — ' + G.one, B(['**Cómo se gana dinero:** ' + G.earn + '.', '**Lo que decide si funciona:** ' + G.key + '.', '**Ojo con:** ' + G.risk + '.']), 'Te encaja si ' + G.fit + '. Quizá no si ' + G.notfit + '.', note);
   return body;
 }
@@ -10129,7 +13082,7 @@ function dataFor(E) {
   const t = ideaText(); const q = t ? quickD(t) : null;
   return q ? { D: q.D, det: q.det, quick: true, text: t } : null;
 }
-const QUICK = 'Es una **estimación rápida** a partir de lo que me has contado: en Compite se afina con tus datos.';
+const QUICK = 'Es una **estimación rápida** con lo que me contaste. En Compite la afinas con tus datos.';
 /** Consultoría completa sobre una idea escrita: análisis, recomendaciones de precio, modelo, estrategia y viabilidad. */
 /** Quita la fórmula de apertura («Tengo una idea: …», «Quiero montar …») para que no acabe como nombre del proyecto. */
 const IDEA_LEAD = /^\s*(tengo una idea( de negocio)?|mi idea (es|seria|consiste en)|se me ocurre|he pensado en|estoy pensando en)\s*[:,.-]?\s+/i;
@@ -10173,7 +13126,7 @@ function startDiscover(E, pre) {
   if (step === 'done') return finishDiscover(E);
   const first = step === 'origin';
   const p = stepPrompt(step, E);
-  return { t: J(first ? '**Vamos a concretar tu idea en 5 preguntas cortas.** Escribe con tus palabras o toca una opción; «no sé» también vale, y puedes decir «atrás» o «saltar».' : 'Vamos a completar tu idea con lo que me falta.', p.t), qr: p.qr, id: 'discover', flowOn: 1 };
+  return { t: J(first ? '**Concretamos tu idea en 5 preguntas cortas.** Escribe o toca una opción. «No sé» también vale; también puedes decir «atrás» o «saltar».' : 'Completamos tu idea con lo que falta.', p.t), qr: p.qr, id: 'discover', flowOn: 1 };
 }
 function finishDiscover(E) {
   const s = st.d.slots; if (!s.what) s.what = 'Una idea de negocio por definir';
@@ -10184,11 +13137,11 @@ function finishDiscover(E) {
   if (gate && r) acts.push({ l: 'Señalar ' + shortOf(r.key), pick: r.card, sub: r.crea ? 'crea' : '' });
   if (!gate) acts.push({ l: 'Llevarla a Compite', fn: 'useDraft' });
   const lines = [pr && pr.detail ? 'Nivel de detalle: **' + pr.detail.label.toLowerCase() + '**. ' + pr.detail.msg : '', r ? 'El modelo que mejor encaja es **' + r.name + '**' + (r.alt ? ' (también podría ser ' + r.alt.name + ')' : '') + '.' : 'Aún no tengo señal clara sobre el modelo: usa «Otro / Modelo Híbrido» o cuéntame más.', miss.length ? 'Para afinarla más te falta: ' + miss.map((x) => x.l).join(', ') + '.' : ''];
-  return { t: J('## Tu idea, en una frase', '«' + draft + '»', lines.filter(Boolean).join(' '), gate ? 'Cuando elijas modelo, la llevamos a Compite y generas el informe en un clic.' : 'Con esto, Compite genera tu informe en un clic.'), acts: acts, qr: ['Mejorar la idea', 'Empezar de nuevo', '¿Qué modelo me conviene?'], id: 'discover-done' };
+  return { t: J('## Tu idea, en una frase', '«' + draft + '»', lines.filter(Boolean).join(' '), gate ? '**Siguiente paso:** elige modelo y la llevamos a Compite.' : '**Siguiente paso:** Compite genera tu informe en un clic.'), acts: acts, qr: ['Mejorar la idea', 'Empezar de nuevo', '¿Qué modelo me conviene?'], id: 'discover-done' };
 }
 function discoverTurn(X, E) {
   const s = st.d.slots, step = st.d.step, y = NLU.yn(X.n);
-  if (y === 'stop') { st.d.flow = ''; st.d.step = ''; return { t: 'Vale, lo dejamos aquí. Cuando quieras retomarlo, pulsa **«Ayúdame a concretar mi idea»**.', qr: defaults(E), id: 'discover-stop' }; }
+  if (y === 'stop') { st.d.flow = ''; st.d.step = ''; return { t: 'Vale, lo dejamos aquí. Para retomarlo, pulsa **«Ayúdame a concretar mi idea»**.', qr: defaults(E), id: 'discover-stop' }; }
   if (y === 'back') {
     ['chan', 'budget', 'how', 'what'].some((k) => { if (s[k]) { delete s[k]; if (k === 'how') delete s.howSent; if (k === 'what') { delete s.origin; } return true; } return false; });
     const ns = nextStep(s); st.d.step = ns; const p = stepPrompt(ns, E); return { t: J('Volvemos atrás.', p.t), qr: p.qr, id: 'discover', flowOn: 1 };
@@ -10297,64 +13250,128 @@ function ideaIntake(X, E) {
   return { t: J('## Esto es lo que entiendo', B(lines), 'Nivel de detalle: **' + d.label.toLowerCase() + '**. ' + d.msg, need ? 'Me falta: ' + d.missing.map((x) => x.l).join(', ') + '. **¿Lo completamos?**' : 'Está bastante completa. **¿La llevamos a Compite?**'), acts: acts, qr: need ? ['Sí, completar lo que falta', '¿Qué modelo me conviene?', 'Mejorar mi titular'].slice(0, 2).concat(gate ? [] : ['Llevarla a Compite']) : ['¿Qué modelo me conviene?', Q.price, Q.aud], id: 'idea-in' };
 }
 
+// ---------- memoria de la conversación: qué recuerda Astro y cómo se borra ----------
+function memReply() {
+  const D = MEM.describe(st.mem);
+  if (!D) return { t: 'Aún no recuerdo nada de esta conversación. Cuéntame tu idea o tus cifras (precio, presupuesto, horas) y las tendré en cuenta.', id: 'memory' };
+  return { t: J('## Esto es lo que recuerdo', D, 'Se guarda solo en tu navegador' + (ragMemOk() ? '. Como activaste la IA con tu proyecto, un resumen corto de esto viaja a tu servidor con cada pregunta que escribes' : '') + '. Para borrarlo, escribe **olvida lo que te he dicho**.'), id: 'memory' };
+}
+function forgetReply() {
+  MEM.forget(st.mem); persist();
+  return { t: 'Hecho: he borrado lo que recordaba de esta conversación (cifras, decisiones y temas). Tu proyecto y tu perfil siguen como estaban.', id: 'forgetmem' };
+}
+
 // ---------- intenciones ----------
 const IT = [];
 const def = (id, m, fn, o) => IT.push(Object.assign({ id: id, m: m, fn: fn }, o || {}));
-const CH = { price: Q.price, aud: Q.aud, comp: Q.comp, risk: Q.risk, legal: Q.tram, land: Q.h1, costs: Q.cost, plan: Q.plan, chan: Q.chan, validate: Q.val, next: Q.start, metrics: Q.crit, progress: Q.prog, appwhat: Q.appwhat, apphow: Q.apphow, mods: Q.mods, explain: Q.explain, discover: Q.disc, mwhat: Q.what, concept_tam: Q.tam, concept_cac: Q.cac, concept_be: Q.be, trust: Q.trust, cta: Q.cta, h1: Q.h1, phases: Q.ph, demo: Q.demo, enc: Q.enc, arr: Q.arr, soc: Q.soc };
+const CH = { price: Q.price, aud: Q.aud, comp: Q.comp, risk: Q.risk, legal: Q.tram, land: Q.h1, costs: Q.cost, plan: Q.plan, chan: Q.chan, validate: Q.val, next: Q.start, metrics: Q.crit, progress: Q.prog, appwhat: Q.appwhat, apphow: Q.apphow, mods: Q.mods, explain: Q.explain, discover: Q.disc, mwhat: Q.what, concept_tam: Q.tam, concept_cac: Q.cac, concept_be: Q.be, trust: Q.trust, cta: Q.cta, h1: Q.h1, phases: Q.ph, enc: Q.enc, arr: Q.arr, soc: Q.soc };
 
 // conversación y estado de ánimo
-def('greet', [/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|ey|que tal|saludos|buen dia)\b/, 8], (E) => ({ t: J('Hola. ' + (E.lab ? 'Estás en **' + modName(E.v) + '** con el modelo **' + E.lab + '**.' : 'Aún no has elegido modelo de negocio.'), 'Dime qué necesitas o toca una sugerencia.') }));
+def('greet', [/^(hola|buenas|buenos dias|buenas tardes|buenas noches|hey|ey|que tal|saludos|buen dia)\b/, 8], (E) => ({ t: J('Hola. ' + (E.lab ? 'Estás en **' + modName(E.v) + '** con el modelo **' + E.lab + '**.' : 'Aún no has elegido modelo de negocio.'), '¿Qué necesitas? Escribe o toca una sugerencia.') }));
 def('chitchat', [/^(ja(ja)+|je(je)+|jo(jo)+|haha+|lol|xd+|jaja)/, 8, 'jaja', 4, 'jeje', 4], () => ({ t: 'Me alegro. Cuando quieras, seguimos con el siguiente paso.', id: 'chitchat' }));
 def('thanks', [/^(gracias|muchas gracias|mil gracias|genial|perfecto|vale|ok|okey|entendido|guay|de acuerdo|estupendo|fenomenal|buenisimo|lo entiendo|ya lo entiendo|queda claro|ya veo|ya entiendo)\b/, 8], () => ({ t: 'Para eso estoy. Cuando quieras seguimos con el siguiente paso.' }));
-def('bye', [/^(adios|hasta luego|chao|nos vemos|hasta pronto|me voy)\b/, 8], () => ({ t: 'Hasta luego. Tu conversación se guarda aquí: cuando vuelvas, seguimos donde lo dejamos.' }));
-def('who', ['que eres', 4, 'quien eres', 4, 'como te llamas', 6, 'tu nombre', 4, 'quien es astra', 6, 'quien es astro', 6, 'te llamas astra', 4, 'presentate', 6, 'preséntate', 6, 'tu tarjeta', 5, /(que (puedes|sabes|haces)|para que sirves|como funcionas|que puedo (preguntar|pedir)|en que (me )?(puedes )?ayudar|que (me )?ofreces)/, 4], (E) => ({ seq: [cardPart(), { t: J('Soy **Astro**, tu mentor y consultor oficial en ValidLance. Reconozco en qué módulo estás y qué modelo de negocio has elegido, y respondo con tus datos del panel.', B(['**Escucho tu idea** y te doy recomendaciones de **precio, modelo de negocio, estrategia y viabilidad**, con cifras.', 'Te ayudo a **concretar tu idea** si no sabes por dónde empezar.', 'Te explico **cómo funciona ValidLance** y qué aporta cada módulo.', 'Comento cada **modelo de negocio** mientras eliges (la elección siempre es tuya).', 'En Compite te **explico los datos en lenguaje sencillo**: mercado, rivales, precio y riesgos.'])) }], acts: [ac('Ver la presentación de ValidLance', { fn: 'intro' })], qr: [Q.myidea, Q.disc, Q.appwhat, E.ran ? Q.explain : Q.start], id: 'who' }));
+def('bye', [/^(adios|hasta luego|chao|nos vemos|hasta pronto|me voy)\b/, 8], () => ({ t: 'Hasta pronto. Tu chat se guarda: cuando vuelvas, seguimos donde lo dejamos.' }));
+def('who', ['que eres', 4, 'quien eres', 4, 'como te llamas', 6, 'tu nombre', 4, 'quien es astra', 6, 'quien es astro', 6, 'te llamas astra', 4, 'presentate', 6, 'preséntate', 6, 'tu tarjeta', 5, /(que (puedes|sabes|haces)|para que sirves|como funcionas|que puedo (preguntar|pedir)|en que (me )?(puedes )?ayudar|que (me )?ofreces)/, 4], (E) => ({ seq: [cardPart(), { t: J('Soy **Astro**, tu mentor en ValidLance. Sé en qué módulo estás y qué modelo elegiste, y respondo con tus datos.', B(['**Analizo tu idea:** precio, modelo, estrategia y viabilidad, con cifras.', '**Te ayudo a concretarla** si no sabes por dónde empezar.', '**Te explico ValidLance** y qué hace cada módulo.', '**Te comparo con el mercado:** cifras de tu sector con fuente y fecha, y qué palanca mover.', '**Comento cada modelo de negocio** mientras eliges. Decides tú.', '**Traduzco los datos de Compite** a lenguaje claro: mercado, rivales, precio y riesgos.'])) }], acts: [ac('Ver la presentación de ValidLance', { fn: 'intro' })], qr: [Q.myidea, Q.disc, E.fam && E.fam !== 'gen' ? Q.radar : Q.appwhat, E.ran ? Q.vs : Q.start], id: 'who' }));
 def('here', ['que hago aqui', 8, 'que hago en esta seccion', 8, 'que hago en este apartado', 8, 'que hago en esta pantalla', 8, 'para que sirve esta pantalla', 8, 'para que sirve esta seccion', 8, 'para que sirve este apartado', 8, 'explicame esta pantalla', 8, 'explicame esta seccion', 8, 'explicame este apartado', 8, 'presenta este apartado', 9, 'presentame esto', 8, 'donde estoy', 6, 'que es esto', 3, 'que hay aqui', 6], (E) => { const R = presChat(E); R.id = 'here'; return R; });
-def('tour', ['ver la presentacion', 9, 'presentacion de validlance', 9, 'presenta validlance', 9, 'presentame validlance', 9, 'presentame la app', 9, 'ensename la app', 9, 'ensename validlance', 9, 'dame un tour', 9, 'hazme un tour', 9, 'tour por', 6, 'el tour', 5, 'recorrido', 4, 'repite la presentacion', 9, 'repite la bienvenida', 9, 'dame la bienvenida', 9, 'bienvenida', 3, 'vuelve a presentarte', 9, 'presentacion de bienvenida', 9], () => { setTimeout(() => introStart(true), reduced() ? 60 : 700); return { t: 'Claro: **te enseño ValidLance** paso a paso. Me voy del chat un momento y salgo a la pantalla; puedes saltar la presentación cuando quieras.', id: 'tour' }; });
-def('awayme', ['apartate', 9, 'hazte a un lado', 9, 'quitate de en medio', 9, 'escondete', 8, 'recogete', 8, 'desaparece un rato', 8, 'molestas', 5, 'estas en medio', 8, 'me tapas', 8, /(apart|esconde|recoge)\w*(te| un rato)/, 7], () => { st.away = 1; persist(); setTimeout(() => { if (st.open) close(true); if (life) life.sleep('away'); }, reduced() ? 100 : 1400); return { t: 'Claro: **me aparto** y me quedo como una estrella pequeña en el borde. Cuando me necesites, **acércate o tócame** y vuelvo; también puedes escribirme desde ahí.', id: 'awayme' }; });
-def('presoff', ['no me presentes', 8, 'deja de presentar', 8, 'no presentes los apartados', 9, 'sin presentaciones', 7, /(no|deja de|quita|desactiva).{0,20}(present\w+)/, 8], (E) => { st.nopres = 1; persist(); hidePres(); return { t: 'Hecho: **no te presentaré más apartados**. Sigo aquí abajo cuando me necesites. Si cambias de opinión, dime «**presenta los apartados**».', id: 'presoff' }; });
+def('tour', ['ver la presentacion', 9, 'presentacion de validlance', 9, 'presenta validlance', 9, 'presentame validlance', 9, 'presentame la app', 9, 'ensename la app', 9, 'ensename validlance', 9, 'dame un tour', 9, 'hazme un tour', 9, 'tour por', 6, 'el tour', 5, 'recorrido', 4, 'repite la presentacion', 9, 'repite la bienvenida', 9, 'dame la bienvenida', 9, 'bienvenida', 3, 'vuelve a presentarte', 9, 'presentacion de bienvenida', 9], () => { setTimeout(() => introStart(true), reduced() ? 60 : 700); return { t: 'Vamos: **tour de ValidLance**. Salgo a la pantalla un momento y puedes saltarlo cuando quieras.', id: 'tour' }; });
+def('awayme', ['apartate', 9, 'hazte a un lado', 9, 'quitate de en medio', 9, 'escondete', 8, 'recogete', 8, 'desaparece un rato', 8, 'molestas', 5, 'estas en medio', 8, 'me tapas', 8, /(apart|esconde|recoge)\w*(te| un rato)/, 7], () => { st.away = 1; persist(); setTimeout(() => { if (st.open) close(true); if (life) life.sleep('away'); }, reduced() ? 100 : 1400); return { t: 'Hecho: **me aparto** y me quedo como una estrella pequeña en el borde. Para llamarme, **acércate o tócame**; también puedes escribirme desde ahí.', id: 'awayme' }; });
+def('presoff', ['no me presentes', 8, 'deja de presentar', 8, 'no presentes los apartados', 9, 'sin presentaciones', 7, /(no|deja de|quita|desactiva).{0,20}(present\w+)/, 8], (E) => { st.nopres = 1; persist(); hidePres(); return { t: 'Hecho: **no te presentaré más apartados**. Sigo aquí abajo. Para reactivarlo, dime «**presenta los apartados**».', id: 'presoff' }; });
 def('preson', ['presenta los apartados', 9, 'presentame los apartados', 9, 'activa las presentaciones', 9, 'vuelve a presentar', 8, /(activa|enciende|vuelve a|quiero).{0,20}(present\w+)/, 8], (E) => { st.nopres = 0; persist(); return { t: 'Hecho: **te presentaré cada apartado** al cambiar de sección.', id: 'preson' }; });
 def('autoopen', [/(abre(te)?|abrir(te)?|abierto|aparec\w+|despleg\w+|salt\w+).*(al iniciar|al empezar|al arrancar|al entrar|solo|sola|automatic\w+)|bienvenida automatica|no te abras|no abrirte|no quiero que te abras/, 6], (E, X) => {
   const off = /\b(no (te )?abras|no abrirte|no quiero que te abras|deja de abrirte|desactiv\w+|quita\w*)\b/.test(X.n);
   st.noAuto = off ? 1 : 0; persist();
   return { t: off ? 'Hecho: **no me abriré solo** al iniciar. Seguiré en el botón de abajo cuando me necesites. Si cambias de opinión, escríbeme **«abrirte al iniciar»**.' : 'Hecho: **me abriré solo** al empezar cada sesión, con un saludo corto. Si te molesta, escríbeme **«no te abras solo»**.', id: 'autoopen' };
 });
-def('ai', [/(eres (una |un )?(ia|inteligencia|bot|robot|humano|real|persona)|chatgpt|\bgpt\b|\bllm\b|modelo de lenguaje|usas (ia|inteligencia)|con ia|api key)/, 4], () => ({ t: J('Soy **Astro**, un mentor virtual **simulado**: respondo con reglas y con los motores de análisis de ValidLance y los datos de tu panel, sin IA externa. Por eso mis respuestas son orientativas y a veces te pediré que reformules.', 'Todo lo que calculo se hace en tu navegador y no se envía a ningún servidor.') }));
-def('overwhelm', ['abrumad*', 4, 'agobi*', 4, 'estres*', 3, 'bloquead*', 4, 'tanto dato', 3.5, 'tantos datos', 3.5, 'tanta informacion', 4, 'mucha informacion', 4, 'no entiendo nada', 5, 'estoy perdid*', 4, 'me pierdo', 4, 'no puedo mas', 4, 'demasiado', 1.5], (E) => {
+def('ai', [/(eres (una |un )?(ia|inteligencia|bot|robot|humano|real|persona)|chatgpt|\bgpt\b|\bllm\b|modelo de lenguaje|usas (ia|inteligencia)|con ia|api key)/, 4], () => (ragOn() ? { t: J('**Soy Astro, tu mentor virtual.** Con «IA con tu proyecto» activada:', B(['Lo que escribes a mano en el chat va a **tu servidor**. Un modelo de lenguaje responde con tu proyecto y la guía de ValidLance.', 'Botones, sugerencias y cálculos con tus cifras siguen en tu navegador.']), 'Mis respuestas son orientativas, no asesoramiento legal ni financiero. Puedes apagarlo en el menú de tu cuenta.'), id: 'ai' } : { t: J('**Soy Astro, un mentor virtual simulado.** Respondo con reglas, con los motores de análisis de ValidLance y con los datos de tu panel. Sin IA externa.', B(['Mis respuestas son orientativas.', 'A veces te pediré que reformules.', 'Todo se calcula en tu navegador: no se envía nada a ningún servidor.'])) }));
+def('overwhelm', ['abrumad*', 4, 'agobi*', 4, 'estres*', 3, 'bloquead*', 4, 'tanto dato', 3.5, 'tantos datos', 3.5, 'tanta informacion', 4, 'mucha informacion', 4, 'no entiendo nada', 5, /estoy (muy )?perdid/, 4, 'me pierdo', 4, 'no puedo mas', 4, 'demasiado', 1.5], (E) => {
   const D = E.v === 'compite' && E.ran ? digest() : null;
-  if (D) return { t: J('Respira: **no necesitas entender todas las cifras**. Quédate con tres:', B(['Puntuación: **' + D.viab + ' sobre 100** (' + lc(D.band.l) + ').', 'Lo que más te frena: **' + (D.risks[0] ? D.risks[0].title : 'nada destacado') + '**.', 'Lo primero que hacer: **' + (D.recs[0] ? D.recs[0].t : 'validar con clientes') + '**.']), 'Si quieres, te lo cuento todo en lenguaje llano, paso a paso.'), acts: [ac(Q.explain, { explain: 1 })], qr: [Q.explain, Q.first, Q.risks] };
+  if (D) return { t: J('Respira: **solo necesitas tres cosas**.', B(['Puntuación: **' + D.viab + ' sobre 100** (' + lc(D.band.l) + ').', 'Lo que más te frena: **' + (D.risks[0] ? D.risks[0].title : 'nada destacado') + '**.', 'Lo primero que hacer: **' + (D.recs[0] ? D.recs[0].t : 'validar con clientes') + '**.']), '¿Quieres el resto? Te lo cuento en 2 mensajes cortos.'), acts: [ac(Q.explain, { explain: 1 })], qr: [Q.explain, Q.first, Q.risks] };
   const c = nextCheck();
-  return { t: J('Tranquilo: **un paso cada vez**. No hace falta tenerlo todo claro hoy.', c ? 'Tu siguiente paso es solo este: **' + c.label + '** (en ' + MODS[c.m] + ').' : 'Empieza por lo más pequeño: escribir tu idea en una frase.'), acts: c ? [ac('Ir a ' + MODS[c.m], c.m)] : [ac(Q.disc, { q: Q.disc })], qr: [Q.disc, Q.next, Q.apphow] };
+  return { t: J('**Un paso cada vez.** No hace falta tenerlo todo claro hoy.', c ? '**Siguiente paso:** ' + c.label + ' (en ' + MODS[c.m] + ').' : '**Siguiente paso:** escribe tu idea en una frase.'), acts: c ? [ac('Ir a ' + MODS[c.m], c.m)] : [ac(Q.disc, { q: Q.disc })], qr: [Q.disc, Q.next, Q.apphow] };
 });
-def('fear', ['miedo', 3, 'fracas*', 3, /me da (cosa|pena|panico|respeto)/, 3, 'inseguro*', 3, 'no me atrevo', 4, 'ansiedad', 2, 'nervios*', 2, /y si (sale|me sale|va) mal/, 4, 'perder dinero', 3], (E) => ({ t: J('Es normal sentir eso, y **para eso sirve validar**: probar la idea con muy poco dinero antes de apostar nada.', B(['Habla con 10 personas de tu público antes de construir nada.', 'Prueba con una landing y una lista de espera, no con un producto terminado.', 'Pon un tope: decide cuánto estás dispuesto a perder y no pases de ahí.']), 'Cada dato que consigues reduce el riesgo.'), acts: [ac('Cómo validar sin gastar', { q: Q.val })], qr: [Q.val, Q.disc, Q.risk] }));
+def('fear', ['miedo', 3, 'fracas*', 3, /me da (cosa|pena|panico|respeto)/, 3, 'inseguro*', 3, 'no me atrevo', 4, 'ansiedad', 2, 'nervios*', 2, /y si (sale|me sale|va) mal/, 4, 'perder dinero', 3], (E) => ({ t: J('**Es normal. Y para eso sirve validar:** probar la idea con muy poco dinero antes de apostar nada.', B(['Habla con 10 personas de tu público antes de construir.', 'Prueba con una landing y lista de espera, no con un producto terminado.', 'Pon un tope: decide cuánto puedes perder y no lo pases.']), 'Cada dato que consigues reduce el riesgo.'), acts: [ac('Cómo validar sin gastar', { q: Q.val })], qr: [Q.val, Q.disc, Q.risk] }));
 def('consult', ['analiza mi idea', 8, 'analiza esta idea', 8, 'analizame la idea', 8, 'analiza la idea', 7, 'quiero que analices mi idea', 12, 'valora mi idea', 8, 'evalua mi idea', 8, 'que opinas de mi idea', 8, 'que te parece mi idea', 8, 'opina de mi idea', 6, 'dame tu opinion', 6, 'recomendaciones para mi idea', 8, 'dame recomendaciones', 7, 'asesorame', 6, 'consultoria', 5, 'que me recomiendas', 5, 'dame tu analisis', 7, 'es buena mi idea', 7, 'es viable mi idea', 8, 'es viable', 3, 'tengo una idea para analizar', 8, 'te cuento mi idea', 7, 'quiero contarte mi idea', 8, 'quiero contarte una idea', 8], (E) => {
   const t = ideaText(); const R = t ? consultReply(t, E) : null;
   if (R) return R;
   st.d.pend = { kind: 'idea' };
-  return { t: J('Claro. **Cuéntame tu idea** como se la contarías a un amigo: qué vendes, a quién y, si lo sabes, cuánto cobrarías y con qué presupuesto empiezas.', 'Con eso te doy mi análisis y recomendaciones de **precio, modelo de negocio, estrategia y viabilidad**.'), qr: ['Cobraría 29 € al mes por una app para peluquerías', 'Vendo un curso online de Excel por 49 €', Q.disc], id: 'consult-ask' };
+  return { t: J('**Cuéntame tu idea** como a un amigo: qué vendes, a quién y, si lo sabes, cuánto cobrarías y con cuánto empiezas.', 'Te devuelvo análisis y recomendaciones de **precio, modelo, estrategia y viabilidad**.'), qr: ['Cobraría 29 € al mes por una app para peluquerías', 'Vendo un curso online de Excel por 49 €', Q.disc], id: 'consult-ask' };
 });
 def('improve', ['mejorar la viabilidad', 8, 'como mejoro la viabilidad', 12, 'subir la puntuacion', 6, 'mejorar la puntuacion', 6, 'como mejoro mi idea', 6, 'como puedo mejorar', 4, 'que mejoro', 4, 'subir la viabilidad', 8, 'mas viable', 4, 'hacerla mas viable', 8], (E) => {
   const d = dataFor(E);
-  if (!d) { st.d.pend = { kind: 'idea' }; return { t: 'Para decirte cómo mejorar la viabilidad necesito conocer tu idea. **Cuéntamela** en una frase: qué vendes, a quién y cuánto cobrarías.', qr: [Q.disc], id: 'improve-ask' }; }
+  if (!d) { st.d.pend = { kind: 'idea' }; return { t: 'Necesito tu idea para subir la nota. **Cuéntamela en una frase:** qué vendes, a quién y cuánto cobrarías.', qr: [Q.disc], id: 'improve-ask' }; }
   return { t: J(EX.improve(d.D).t, d.quick ? QUICK : ''), acts: E.v === 'compite' && E.ran ? [ac('Ver propuestas', { nav: 'chain' })] : [ac('Llevarla a Compite', { fn: 'useDraft' })], qr: [Q.price, Q.comp, Q.first], id: 'improve' };
 });
 def('doubt', [/tengo una idea/, 2.5, /no se si (es|esta|vale|funciona|merece|sera|tiene)/, 3.5, 'es buena', 2, 'merece la pena', 3, 'vale la pena', 3, 'sera rentable', 3, 'funcionara', 3, 'tiene futuro', 3, 'es viable', 3], (E) => {
   st.d.pend = { kind: 'discover' };
-  return { t: J('Eso es justo lo que ValidLance ayuda a comprobar, **sin gastar dinero**: primero se concreta la idea, después se mide si hay demanda y cuánto espacio hay frente a la competencia.', '¿Quieres que te haga unas preguntas para **concretarla**? O cuéntamela en una frase y la miro.'), qr: ['Sí, ayúdame a concretarla', 'Prefiero contártela yo', Q.val], id: 'doubt' };
+  return { t: J('**Justo para eso está ValidLance:** comprobarlo sin gastar dinero.', 'Primero concretas la idea. Después mides la demanda y el hueco frente a la competencia.', '¿Te hago unas preguntas para **concretarla**? O cuéntamela en una frase y la miro.'), qr: ['Sí, ayúdame a concretarla', 'Prefiero contártela yo', Q.val], id: 'doubt' };
 });
 def('nopath', [/(no se|ni idea|no tengo (ni )?claro).{0,22}(empez|comenz|por donde|que hacer|que montar|que vender|que negocio|que idea|que emprender)/, 5, 'por donde empezar', 3, 'por donde empiezo', 3, 'no tengo ninguna idea', 5, 'no tengo idea', 3, 'quiero emprender', 3, 'emprender', 1.5, 'desde cero', 2, 'sin experiencia', 2.5, /(que|cual).{0,12}(negocio|idea).{0,18}(puedo|monto|empiezo|hago|conviene|me recomiendas)/, 4, 'dame ideas', 4, 'ideas de negocio', 4, 'necesito ideas', 4, 'perdido', 2], (E) => startDiscover(E));
 def('discover', ['definir mi proyecto', 8, 'mi proyecto paso a paso', 8, 'concretar', 4, 'definir mi idea', 5, 'afinar mi idea', 5, 'aterrizar', 4, 'ayudame con mi idea', 5, /ayudame a (concretar|definir|pensar|aterrizar)/, 6, 'ayudame a concretar mi idea', 10, 'preguntas orientativas', 4], (E) => startDiscover(E));
 def('fillidea', ['completar mi idea', 8, 'completa mi idea', 8, 'lo que falta en mi idea', 8, 'que le falta a mi idea', 8, 'que falta en mi idea', 8, 'mejorar mi idea', 6, 'mejora mi idea', 6, 'pulir mi idea', 6, 'afinar mi idea mas', 6, 'completar lo que falta', 8, 'que me falta en la idea', 8], (E) => (ideaText() ? startFill(E) : startDiscover(E)));
-def('lowbudget', [/(no tengo|sin|poco|pocos|escaso)\s+(\w+\s+)?(dinero|presupuesto|capital|fondos|recursos)/, 5, 'presupuesto bajo', 4, 'sin presupuesto', 5, 'poco dinero', 5, 'estudiante', 2, 'barato', 2.5, 'sin invertir', 4, 'no puedo invertir', 4], (E) => ({ t: J('Con poco dinero **se puede validar**: lo caro es construir antes de saber si alguien paga.', B(['Empieza con una **landing y lista de espera** (Genera la crea sin coste).', 'Haz **10 conversaciones** con gente de tu público.', 'Prueba una **preventa** o un pago simbólico antes de producir.', 'En ' + (E.lab || 'tu modelo') + ' pesan sobre todo: ' + kb(E).cost + '.']), 'Apunta tu presupuesto real en Compite: el análisis se ajusta a él.'), acts: [ac('Probar con mi presupuesto', 'compite')], qr: [Q.val, Q.arr, Q.chan] }));
-def('lowtime', [/(no tengo|poco|sin|falta de)\s+(\w+\s+)?tiempo/, 5, 'poco tiempo', 5, 'horas a la semana', 3, 'compagin*', 3, 'trabajo y estudio', 3], () => ({ t: J('Con poco tiempo, lo importante es **reducir el alcance**, no abandonar:', B(['Elige **una sola tarea por semana** (por ejemplo: una conversación con un cliente posible).', 'Usa el **modo demo** y la plantilla de Genera para avanzar rápido.', 'Deja los trámites de Lanza para cuando la demanda esté clara.']), 'Mira el siguiente paso recomendado y haz solo ese.'), qr: [Q.next, Q.apphow, Q.disc] }));
+def('lowbudget', [/(no tengo|sin|poco|pocos|escaso)\s+(\w+\s+)?(dinero|presupuesto|capital|fondos|recursos)/, 5, 'presupuesto bajo', 4, 'sin presupuesto', 5, 'poco dinero', 5, 'estudiante', 2, 'barato', 2.5, 'sin invertir', 4, 'no puedo invertir', 4], (E) => ({ t: J('**Con poco dinero se puede validar.** Lo caro es construir antes de saber si alguien paga.', B(['Empieza con una **landing y lista de espera** (Genera la crea sin coste).', 'Haz **10 conversaciones** con gente de tu público.', 'Prueba una **preventa** o un pago simbólico antes de producir.', 'En ' + (E.lab || 'tu modelo') + ' pesan sobre todo: ' + kb(E).cost + '.']), 'Apunta tu presupuesto real en Compite: el análisis se ajusta a él.'), acts: [ac('Probar con mi presupuesto', 'compite')], qr: [Q.val, Q.arr, Q.chan] }));
+def('lowtime', [/(no tengo|poco|sin|falta de)\s+(\w+\s+)?tiempo/, 5, 'poco tiempo', 5, 'horas a la semana', 3, 'compagin*', 3, 'trabajo y estudio', 3], () => ({ t: J('**Con poco tiempo, reduce el alcance; no abandones.**', B(['Elige **una sola tarea por semana** (por ejemplo: una conversación con un cliente posible).', 'Usa el **modo demo** y la plantilla de Genera para avanzar rápido.', 'Deja los trámites de Lanza para cuando la demanda esté clara.']), '**Siguiente paso:** haz solo el que te recomiende la app.'), qr: [Q.next, Q.apphow, Q.disc] }));
+
+// ---------- perfil, hoja de ruta y seguimiento personal (coach.js) ----------
+// Todo es local y determinista; el perfil lo cuenta la persona y se guarda solo en su navegador.
+const CO = () => LV.coach;
+def('me', ['que sabes de mi', 9, 'que sabes sobre mi', 9, 'quien soy', 6, 'mi perfil', 7, 'mis datos personales', 8, 'sabes mi nombre', 9, 'como me llamo', 9, 'cual es mi nombre', 9, 'sabes como me llamo', 9, 'que recuerdas de mi', 9, 'que datos tienes de mi', 9, 'datos que tienes de mi', 9], (E) => CO().meReply(E));
+def('memory', ['que recuerdas de lo que hemos hablado', 10, 'que recuerdas de la conversacion', 10, 'que recuerdas de nuestra conversacion', 10, 'de que hemos hablado', 9, 'que hemos hablado', 9, 'que te he contado', 9, 'que te he dicho', 9, 'resume lo que hemos hablado', 9, 'resumen de la conversacion', 9, /que (cifras|datos) (te he|me has) (dado|dicho)/, 8], () => memReply());
+def('forgetmem', ['olvida lo que te he dicho', 12, 'olvida lo que hemos hablado', 12, 'olvida la conversacion', 11, 'olvida mis cifras', 11, 'borra tu memoria', 11, 'borra lo que recuerdas', 11, /\bolvida(lo)?\b.{0,25}\b(todo|lo que)/, 9], () => forgetReply());
+def('setname', [/\b(me llamo|mi nombre es|llamame|puedes llamarme|prefiero que me llames)\b/, 9], (E, X) => CO().nameReply(X));
+def('route', ['mi ruta', 8, 'hoja de ruta', 9, 'mi hoja de ruta', 10, 'mi ruta paso a paso', 12, 'ruta paso a paso', 9, 'plan de trabajo', 7, 'planificacion', 5, 'planificame', 8, 'cronograma', 7, 'estrategia de inicio', 8, 'que toca esta semana', 12, 'esta semana', 4, 'tareas de la semana', 9, 'mi ruta completa', 12, 'ruta completa', 8, 'plan a mi medida', 10, 'organizame', 6, 'organiza mi semana', 10, 'plan semanal', 9, 'mi planificacion', 9], (E, X) => CO().routeReply(E, /completa|entera|fases|todo el/.test(X.n) ? 'full' : 'week'));
+def('today', ['que hago hoy', 10, 'que toca hoy', 10, 'que hago ahora', 6, 'tarea de hoy', 9, 'que tengo que hacer hoy', 10, 'por donde sigo', 6, 'tengo un rato', 6, 'tengo una hora', 7, 'tengo media hora', 8, /\btengo (\d+|dos|tres|cuatro) horas?\b/, 6, 'tengo dos horas', 7, 'tengo un momento', 6, /tengo (\d+) ?(min|minutos)/, 8, 'que puedo hacer hoy', 10, 'dame una tarea', 8, 'que hago esta tarde', 9, 'que hago esta noche', 9, 'que hago esta manana', 9], (E, X) => CO().todayReply(E, X));
+def('adjust', [/(tengo|puedo|dispongo|dedico|dedicar|dedicarle|ahora)\b.{0,28}\b(\d+(?:[.,]\d+)?|un|una|dos|tres|cuatro|cinco|seis|siete|ocho|diez|doce|quince|veinte|treinta)\s*(h\b|horas?)\b/, 8, /(tengo|dispongo de|cuento con)\s+(unos |como |mas o menos )?\d[\d.,]*\s*(€|euros?)/, 8, 'ajustar mi ruta', 12, 'ajusta mi ruta', 12, 'reajusta mi ruta', 12, 'reajusta', 6, 'cambiar mi ruta', 10, 'cambia mi ruta', 10, 'actualiza mi perfil', 10, 'cambia mi perfil', 10, 'cambiar mi perfil', 10, 'he empezado a trabajar', 9, 'me he quedado sin trabajo', 9, 'ya no tengo dinero', 8, 'no tengo dinero', 4, 'sin presupuesto', 2.5, 'tengo poco tiempo', 3, 'ya no tengo tiempo', 8, 'tengo mucho tiempo', 6, 'ahora tengo', 3], (E, X) => {
+  if (CO().adjustHas(X.n)) return CO().adjustReply(E, X);
+  if (/(ajust|cambi|reajust|actualiz)/.test(X.n) && /(ruta|plan|perfil)/.test(X.n)) return CO().tuneReply();
+  return null;
+});
+def('done', [/^(ya )?(lo )?(hice|he hecho|termine|he terminado|acabe|complete)\b/, 6, 'ya lo hice', 9, 'ya lo he hecho', 9, 'ya esta hecho', 9, 'marca como hecho', 10, 'marcalo como hecho', 10, 'marcar como hecho', 10, 'lo he terminado', 9, /\b(ya|he|hice|termine|acabe|complete|consegui|cree|monte|publique|lei|anote|apunte|prepare|probe|defini|decidi|cerre|hable|entreviste)\b.{0,60}\b(hecho|hable|landing|encuesta|visitas|analisis|informe|precio|clientes|mvp|prototipo|tramites|guia|idea|revision|preventa|pago|entrevistas|conversaciones|personas|gente)\b/, 6], (E, X) => {
+  if (/(pero|aunque|\?)/.test(X.raw)) return null;
+  return CO().doneReply(E, X);
+});
+def('quit', [/(dejar|abandonar|renunciar a|dejaria|me despido de)\b.{0,20}\b(mi |el |los |la )?(trabajo|empleo|estudios|carrera|universidad|grado|master|oposicion|oposiciones)/, 9, 'pedir excedencia', 8, 'dedicarme a tiempo completo', 8, 'lanzarme del todo', 6], () => CO().quitReply());
+def('stuck', [/\b(estoy|me siento|sigo|ando|me he quedado|me quede) (muy |un poco |algo )?(atascad|bloquead|estancad|parad)\w*/, 9, 'atascad*', 6, 'estancad*', 6, 'me he atascado', 9, 'no avanzo', 9, 'no estoy avanzando', 9, 'no he hecho nada', 9, 'hoy no he hecho nada', 10, 'procrastin*', 9, 'me da pereza', 8, 'no tengo motivacion', 9, 'sin motivacion', 8, 'desmotivad*', 8, /\b(voy|ando|llevo) (muy )?(atrasad|con retraso)/, 9, 'me he retrasado', 9, 'me cuesta empezar', 8, 'no tengo ganas', 8, 'llevo dias sin', 7, 'he abandonado', 6], () => CO().stuckReply());
+def('plancheck', [/(voy a|quiero|pienso|primero|empezar por|empiezo por|me gustaria|tengo pensado|mi plan es|planeo)/, 3, /(logo|marca|dominio|hosting|web completa|programar|contratar|empleado|oficina|local|constituir|sociedad|empresa|stock|inventario|anuncios|publicidad|facebook ads|google ads|curso completo|grabar|fabricar)/, 5], (E, X) => CO().planReply(X));
+def('tune', [/\b(muy|demasiado|tan|bastante) (larg|lent|pesad|extens|trabaj)\w*/, 12, /\b(mas|algo) (corta|corto|rapida|rapido|breve|ligera|ligero)\b/, 10, /\b(ruta|plan|camino|hoja de ruta)\b.{0,30}\b(larg|lent|pesad|extens|corta)\w*/, 12, 'tarda mucho', 6, 'quiero ir mas rapido', 9, 'prueba minima', 6, 'no me da tiempo', 6, 'no llego a todo', 8, 'son demasiadas', 6, 'es mucho trabajo', 7, 'demasiadas tareas', 9, 'demasiados pasos', 9], () => (CO().has() ? CO().tuneReply() : null));
 
 // qué es ValidLance
-def('appwhat', ['que es validlance', 6, 'que es esto', 3, 'de que va', 3, 'para que sirve esta app', 5, 'para que sirve esta aplicacion', 5, 'para que sirve esta herramienta', 5, 'para que sirve esto', 4, 'para que sirve validlance', 6, /^validlance$/, 4, 'que hace validlance', 6, 'validlance', 2, 'que aporta validlance', 5, 'de que trata', 3, 'cuentame de validlance', 5, 'quienes sois', 3], (E) => ({ t: J('## ValidLance', K.APP.what, K.APP.how, K.APP.honest), acts: [ac('Ver la presentación de ValidLance', { fn: 'intro' })], qr: [Q.apphow, Q.mods, Q.disc, Q.start], id: 'appwhat' }));
-def('apphow', [/como (funciona|se usa|uso|empiezo a usar|va)\b/, 3.5, 'paso a paso', 2, 'tutorial', 3, 'guia', 2, 'recorrido', 3, 'como lo uso', 4, 'como funciona validlance', 8, 'como funciona esto', 5, 'como funciona la app', 6, 'en que consiste', 3, 'orden', 1.5, 'en que orden', 4], (E) => ({ t: J('## Cómo funciona', K.APP.how, 'Una ruta recomendada:', B(K.APP.order)), qr: [Q.mods, Q.disc, E.k ? Q.next : '¿Cuál me conviene?'], id: 'apphow' }));
-def('mods', ['modulos', 3, 'que aporta', 3, 'que aporta cada modulo', 8, 'que hace cada', 4, 'cada modulo', 4, 'apartados', 2, 'secciones', 2, 'partes de la app', 3, 'que puedo hacer aqui', 3, 'funciones', 2, 'que incluye', 2.5], (E) => ({ t: J('## Qué aporta cada módulo', B(['**Valida:** ' + K.MODS.valida.one + ' ' + K.MODS.valida.what.split('. ')[0] + '.', '**Compite:** ' + K.MODS.compite.one + ' ' + K.MODS.compite.what.split('. ')[0] + '.', '**Lanza:** ' + K.MODS.lanza.one + ' ' + K.MODS.lanza.what.split('. ')[0] + '.', '**Genera:** ' + K.MODS.genera.one + ' ' + K.MODS.genera.what.split('. ')[0] + '.', '**Panel:** ' + K.MODS.panel.one + ' ' + K.MODS.panel.what.split('. ')[0] + '.']), K.APP.diff), qr: ['¿Qué es Compite?', '¿Qué es Valida?', '¿Qué es Genera?', '¿Qué es Lanza?'], id: 'mods' }));
-def('appdata', ['donde se guardan', 4, 'mis datos', 2.5, 'privacidad', 2.5, 'se envia', 2, 'servidor', 2, 'confidencial', 2.5, 'quien ve', 3, 'son privados', 3, 'se guardan', 3, 'seguridad', 2.5, 'seguros', 2, 'datos', 1.5, 'guardan', 2], () => ({ t: J('## Tus datos', K.APP.data, K.APP.honest), qr: [Q.appwhat, Q.apphow, Q.start], id: 'appdata' }));
-def('appprice', [/es gratis|gratuito|gratuita/, 4, 'cuesta validlance', 6, 'cuanto cuesta usar', 5, 'es de pago', 4, 'plan de pago', 3, 'precio de validlance', 6, 'cuanto cuesta esto', 4, 'tiene coste', 3, 'cuanto vale validlance', 6, 'cuanto cuesta', 2.5, 'cuanto vale', 2.5, 'cuanto cobran', 3, 'hay que pagar', 4, 'cuesta dinero', 4, 'tiene precio', 3, 'cuanto se paga', 3], () => ({ t: J('No tengo información sobre planes ni precios de ValidLance en esta versión, así que prefiero no inventarlos.', 'Lo que sí te puedo decir es qué hace cada módulo y cómo se guardan tus datos.'), qr: [Q.mods, Q.appwhat] }));
-def('appwho', ['para quien es', 4, 'a quien va dirigido', 4, 'quien puede usar', 3, 'quien lo usa', 3, 'es para mi', 3, 'sirve para', 1.5], () => ({ t: J('ValidLance es para **quien quiere comprobar una idea de negocio antes de gastar dinero**: estudiantes, autónomos, creadores o equipos que empiezan.', 'Te ayuda a ordenar la idea, medir la demanda, ver el mercado y preparar el lanzamiento.'), qr: [Q.disc, Q.apphow, Q.mods] }));
-def('appdiff', [/diferencia\w* entre (valida|compite|lanza|genera)/, 8, /(valida|compite|lanza|genera) (o|y|frente a|vs) (valida|compite|lanza|genera)/, 6, 'se complementan', 3], () => ({ t: J(K.APP.diff, 'Después, **Genera** crea la landing que usa Valida y **Lanza** ordena los trámites.'), qr: [Q.mods, Q.apphow] }));
+def('appwhat', ['que es validlance', 6, 'que es esto', 3, 'de que va', 3, 'para que sirve esta app', 5, 'para que sirve esta aplicacion', 5, 'para que sirve esta herramienta', 5, 'para que sirve esto', 4, 'para que sirve validlance', 6, /^validlance$/, 4, 'que hace validlance', 6, 'validlance', 2, 'que aporta validlance', 5, 'de que trata', 3, 'cuentame de validlance', 5, 'quienes sois', 3], (E) => ({ t: J('## ValidLance', K.APP.what, B(['**Valida:** ¿hay demanda real?', '**Compite:** mercado, rivales y precio.', '**Lanza:** trámites, costes y plazos.', '**Genera:** tu landing.', '**Panel:** tu progreso y el siguiente paso.']), K.APP.honest), acts: [ac('Ver la presentación de ValidLance', { fn: 'intro' })], qr: [Q.apphow, Q.mods, Q.disc, Q.start], id: 'appwhat' }));
+def('apphow', [/como (funciona|se usa|uso|empiezo a usar|va)\b/, 3.5, 'paso a paso', 2, 'tutorial', 3, 'guia', 2, 'recorrido', 3, 'como lo uso', 4, 'como funciona validlance', 8, 'como funciona esto', 5, 'como funciona la app', 6, 'en que consiste', 3, 'orden', 1.5, 'en que orden', 4], (E) => ({ t: J('## Cómo funciona', 'Eliges tu modelo y trabajas en 4 fases. El **Panel** te marca el siguiente paso.', '**Ruta recomendada:**', B(K.APP.order)), qr: [Q.mods, Q.disc, E.k ? Q.next : '¿Cuál me conviene?'], id: 'apphow' }));
+def('mods', ['modulos', 3, 'que aporta', 3, 'que aporta cada modulo', 8, 'que hace cada', 4, 'cada modulo', 4, 'apartados', 2, 'secciones', 2, 'partes de la app', 3, 'que puedo hacer aqui', 3, 'funciones', 2, 'que incluye', 2.5], (E) => ({ t: J('## Qué aporta cada módulo', B(['**Centro de control:** ' + K.MODS.hub.one + ' ' + K.MODS.hub.what.split('. ')[0] + '.', '**Valida:** ' + K.MODS.valida.one + ' ' + K.MODS.valida.what.split('. ')[0] + '.', '**Compite:** ' + K.MODS.compite.one + ' ' + K.MODS.compite.what.split('. ')[0] + '.', '**Lanza:** ' + K.MODS.lanza.one + ' ' + K.MODS.lanza.what.split('. ')[0] + '.', '**Genera:** ' + K.MODS.genera.one + ' ' + K.MODS.genera.what.split('. ')[0] + '.', '**Panel:** ' + K.MODS.panel.one + ' ' + K.MODS.panel.what.split('. ')[0] + '.']), K.APP.diff), qr: ['¿Qué es Compite?', '¿Qué es Valida?', '¿Qué es Genera?', '¿Qué es Lanza?'], id: 'mods' }));
+def('appdata', ['donde se guardan', 4, 'mis datos', 2.5, 'privacidad', 2.5, 'se envia', 2, 'servidor', 2, 'confidencial', 2.5, 'quien ve', 3, 'son privados', 3, 'se guardan', 3, 'seguridad', 2.5, 'seguros', 2, 'datos', 1.5, 'guardan', 2], () => ({ t: J('## Tus datos', K.APP.data, ragOn() ? '**Excepción (solo si la activas tú):** con «IA con tu proyecto», lo que escribes en el chat, tu idea, modelo, progreso, resumen del análisis y notas van a **tu servidor RAG**. Puedes apagarlo y borrar tus notas desde el menú de tu cuenta.' : '', K.APP.honest), qr: [Q.appwhat, Q.apphow, Q.start], id: 'appdata' }));
+/* planes y Premium: los precios salen de la configuración de la ventana de planes, nunca se inventan */
+const planAnswer = (id) => () => {
+  const P = LV.premium, on = !!(P && P.has()), pr = P ? P.price() : { month: 0, year: 0 }, M = P ? P.money : (x) => x + ' €';
+  return { t: J('## Planes de ValidLance',
+    '**Gratuito (0 €):** todo el flujo de validación (Compite, Genera, Valida, Lanza y el Panel Go / No-Go) y yo, Astro, como mentor en cada pantalla.',
+    '**Premium (' + M(pr.month) + ' al mes o ' + M(pr.year) + ' al año):** además, una red de **5 agentes especializados** y la **comunidad de emprendedores** con muro de proyectos, feedback de tu sector, buscador con filtros y contactos.',
+    on ? 'Ahora mismo tienes **Premium' + (P.isPreview() ? ' en vista previa (sin cobro)' : '') + '**.' : 'Ahora mismo estás en el plan **Gratuito**: no necesitas pagar para validar tu idea.'),
+    acts: [{ l: on ? 'Ver mi plan' : 'Ver planes y precios', fn: 'premium' }], qr: [Q.mods, 'Háblame de los agentes especializados', 'Háblame de la comunidad de emprendedores'], id: id };
+};
+def('appprice', [/es gratis|gratuito|gratuita/, 4, 'cuesta validlance', 6, 'cuanto cuesta usar', 5, 'es de pago', 4, 'plan de pago', 3, 'precio de validlance', 6, 'cuanto cuesta esto', 4, 'tiene coste', 3, 'cuanto vale validlance', 6, 'cuanto cuesta', 2.5, 'cuanto vale', 2.5, 'cuanto cobran', 3, 'hay que pagar', 4, 'cuesta dinero', 4, 'tiene precio', 3, 'cuanto se paga', 3], planAnswer('appprice'));
+def('premium', ['premium', 5, 'plan premium', 7, 'planes', 3, 'plan gratuito', 6, 'plan gratis', 6, 'version premium', 7, 'version gratuita', 5, 'version de pago', 5, 'suscripcion', 3.5, 'suscribirme', 6, 'mejorar mi plan', 7, 'actualizar mi plan', 7, 'actualizar a premium', 9, 'pasar a premium', 9, 'que incluye premium', 9, 'que incluye el plan', 6, 'merece la pena premium', 7, 'precio de premium', 8, 'cuanto cuesta premium', 9, 'que gano con premium', 8, 'para que sirve premium', 8], planAnswer('premium'));
+def('agents', ['agentes especializados', 8, 'agente especializado', 8, 'red de agentes', 8, 'agentes por sector', 7, 'agentes de ia', 4, 'especialista', 3, 'especialistas', 4, 'agente de saas', 8, 'agente de ecommerce', 8, 'agente de e-commerce', 8, 'agente de trading', 8, 'agente de servicios', 8, 'agente de formacion', 8, /\b(lyra|vega|sirio|orion|andromeda)\b/, 7, 'hablar con un especialista', 8, 'agentes de cada sector', 8, 'agentes por vertical', 8, 'agentes verticales', 8], (E, X) => {
+  const P = LV.premium, on = !!(P && P.has()), L = LV.spec ? LV.spec.list() : [], mine = LV.spec ? LV.spec.forModel() : null;
+  const m = X && X.n ? X.n.match(/\b(lyra|vega|sirio|orion|andromeda)\b/) : null, one = m ? L.find((a) => NLU.norm(a.name) === m[1]) : null;
+  const acts = [];
+  if (one) acts.push(on ? { l: 'Consultar con ' + one.name, fn: 'spec', id: one.id } : { l: 'Desbloquear con Premium', fn: 'premium', f: 'agents' });
+  else { acts.push({ l: 'Ver la red de agentes', fn: 'agents' }); if (on && mine) acts.push({ l: 'Hablar con ' + mine.name + ' (' + mine.vert + ')', fn: 'spec', id: mine.id }); if (!on) acts.push({ l: 'Ver planes y precios', fn: 'premium', f: 'agents' }); }
+  return { t: J(one ? '## ' + one.name + ' · ' + one.vert : '## Red de agentes especializados',
+    one ? '**' + one.name + '** es el agente de la red Premium para **' + (one.lc || one.vert) + '**. Esto es lo que cubre:' : 'En Premium, cada vertical tiene su agente, con la guía de su sector:',
+    one ? B(one.covers) : B(L.map((a) => '**' + a.name + '** · ' + a.vert + (mine && mine.id === a.id ? ' (tu sector)' : ''))),
+    'Son agentes virtuales: se apoyan en guías y reglas de su sector y en las cifras que tú anotas, no en datos de mercado en tiempo real, y no dan asesoramiento legal ni financiero.',
+    on ? 'Tienes Premium: puedes hablar con cualquiera.' : 'Forman parte del plan **Premium**; yo, Astro, sigo contigo gratis en todo el recorrido.'), acts: acts, qr: ['Háblame de la comunidad de emprendedores', '¿Qué incluye Premium?', Q.mods], id: 'agents' };
+});
+def('community', ['comunidad', 3.5, 'comunidad de emprendedores', 8, 'comunidad exclusiva', 8, 'networking', 6, 'muro de proyectos', 8, 'otros emprendedores', 5, 'conocer emprendedores', 7, 'contactar con emprendedores', 8, 'publicar mi proyecto', 6, 'ensenar mi proyecto', 5, 'feedback de emprendedores', 8, 'validacion social', 8, 'buscar emprendedores', 8, 'conectar con emprendedores', 8, 'comunidad y validacion', 9], () => {
+  const P = LV.premium, on = !!(P && P.has()), local = !!(LV.community && !LV.community.hasProvider());
+  return { t: J('## Comunidad & Validación', 'Es el hub de emprendedores de **Premium**:',
+    B(['**Muro de proyectos:** publicas tu proyecto con la landing que generaste en ValidLance.', '**Validación y feedback:** opiniones y métricas iniciales de emprendedores de tu mismo sector.', '**Buscador y filtros:** por sector, etapa de desarrollo y modelo de negocio.', '**Contactos:** eliges ser privado, visible o contactable, y aceptas solo las solicitudes que quieras.']),
+    on && local ? 'Ahora mismo es una **vista previa local**: no hay un servidor de comunidad conectado, así que lo que publiques solo lo ves tú.' : '',
+    on ? '' : 'Está incluida en el plan Premium; con el Gratuito sigues teniendo todo el flujo de validación y a mí.'),
+    acts: [{ l: on ? 'Abrir la comunidad' : 'Desbloquear con Premium', fn: on ? 'community' : 'premium', f: 'community' }], qr: ['Háblame de los agentes especializados', '¿Qué incluye Premium?', Q.mods], id: 'community' };
+});
+def('appwho', ['para quien es', 4, 'a quien va dirigido', 4, 'quien puede usar', 3, 'quien lo usa', 3, 'es para mi', 3, 'sirve para', 1.5], () => ({ t: J('**Para quien quiere probar una idea antes de gastar dinero:** estudiantes, autónomos, creadores y equipos que empiezan.', 'Ordenas la idea, mides la demanda, ves el mercado y preparas el lanzamiento.'), qr: [Q.disc, Q.apphow, Q.mods] }));
+def('appdiff', [/diferencia\w* entre (valida|compite|lanza|genera)/, 8, /(valida|compite|lanza|genera) (o|y|frente a|vs) (valida|compite|lanza|genera)/, 6, 'se complementan', 3], () => ({ t: J(K.APP.diff, '**Genera** crea la landing que usa Valida. **Lanza** ordena los trámites.'), qr: [Q.mods, Q.apphow] }));
 def('appreset', ['borrar todo', 4, 'empezar de cero', 5, 'reiniciar', 3, 'resetear', 3, 'borrar mi proyecto', 5, 'borra todo', 4, 'borrar proyecto', 5, 'empezar otra vez', 4, 'empiezo de nuevo', 4, 'de nuevo', 1], () => ({ t: J('Para empezar de cero: abre el **menú de tu cuenta** (arriba a la derecha) y pulsa **«Empezar de cero»**. Hay que pulsarlo **dos veces** para confirmar, porque borra todo el proyecto.', 'Para vaciar solo esta conversación, usa el botón de **nueva conversación** de la cabecera del chat.'), qr: defaults(env()) }));
 def('apptheme', ['tema claro', 4, 'modo oscuro', 4, 'modo claro', 4, 'tema oscuro', 4, 'cambiar el tema', 5, 'cambiar el color', 3, 'colores', 1.5], () => ({ t: 'El interruptor de **tema claro / oscuro** (icono de sol) está en la **cabecera**, arriba a la derecha. Se recuerda la próxima vez.', qr: defaults(env()) }));
 def('appmaker', ['quien ha hecho', 6, 'quien hizo', 6, 'quien creo', 6, 'quien esta detras', 6, 'quien desarrollo', 6, 'quienes sois', 6, 'quien lo ha creado', 6, 'quien lo creo', 6, 'quien programo', 6, 'empresa detras', 5], () => ({ t: J('No tengo información sobre el equipo que está detrás de ValidLance en esta versión, así que prefiero no inventarla.', 'Lo que sí puedo contarte es **para quién es**, **cómo funciona** y **qué aporta cada módulo**.'), qr: [Q.apphow, Q.mods, Q.disc] }));
@@ -10419,7 +13436,64 @@ const CONCEPTS = [
 ];
 CONCEPTS.forEach((c) => def('concept_' + c[0], c[1].concat([/(que es|que significa|explica|explicame|que quiere decir|significado|como se calcula|que son|para que sirve)/, 1]), (E) => conceptReply(c[0], E.ran ? digest() : null, E), { concept: c[0], v: null }));
 // la pregunta compuesta «TAM, SAM y SOM» se explica como un solo bloque de mercado
-def('market', [/(es|hay|tiene|veo) (mucho|poco|bastante|grande|pequeno)\w* .{0,14}mercado|mercado .{0,12}(grande|pequeno|suficiente|saturado)|cuanto mercado|mercado (es )?(grande|mucho)/, 7, /(\btam\b.*\bsam\b|\bsam\b.*\bsom\b|\btam\b.*\bsom\b)/, 12, 'tam sam som', 12, 'del mercado total', 3, 'mercado', 1.5, 'embudo de mercado', 6, 'de que tamano es el mercado', 6, 'cuanto puedo facturar', 4, 'cuanto puedo ganar', 3], (E) => { const D = E.ran ? digest() : null; if (!D) return { t: J('**TAM, SAM y SOM** son tres tamaños de mercado:', B(['**TAM:** ' + K.GLOSS.tam.d, '**SAM:** ' + K.GLOSS.sam.d, '**SOM:** ' + K.GLOSS.som.d]), 'Piensa en una **tarta**: el TAM es la tarta entera, el SAM las porciones que alcanzas y el SOM la que de verdad te comerás este año.', 'Cuando generes tu análisis en Compite te lo explico con tus cifras.'), acts: [ac('Abrir Compite', 'compite')], id: 'concept', concept: 'tam', qr: [Q.wr, Q.disc] }; return Object.assign(EX.topic('market', D), { id: 'concept', concept: 'tam', qr: ['¿Qué es el SOM?', Q.rivals, Q.ads, Q.first] }); });
+def('market', [/(es|hay|tiene|veo) (mucho|poco|bastante|grande|pequeno)\w* .{0,14}mercado|mercado .{0,12}(grande|pequeno|suficiente|saturado)|cuanto mercado|mercado (es )?(grande|mucho)/, 7, /(\btam\b.*\bsam\b|\bsam\b.*\bsom\b|\btam\b.*\bsom\b)/, 12, 'tam sam som', 12, 'del mercado total', 3, 'mercado', 1.5, 'embudo de mercado', 6, 'de que tamano es el mercado', 6, 'cuanto puedo facturar', 4, 'cuanto puedo ganar', 3], (E) => { const D = E.ran ? digest() : null; if (!D) return { t: J('**TAM, SAM y SOM:** tres tamaños de mercado, de mayor a menor.', B(['**TAM:** ' + K.GLOSS.tam.d, '**SAM:** ' + K.GLOSS.sam.d, '**SOM:** ' + K.GLOSS.som.d]), 'Piénsalo como una **tarta**: TAM = la tarta entera, SAM = las porciones que alcanzas, SOM = la que te comes este año.', '**Siguiente paso:** genera tu análisis en Compite y te lo explico con tus cifras.'), acts: [ac('Abrir Compite', 'compite')], id: 'concept', concept: 'tam', qr: [Q.wr, Q.disc] }; return Object.assign(EX.topic('market', D), { id: 'concept', concept: 'tam', qr: ['¿Qué es el SOM?', Q.rivals, Q.ads, Q.first] }); });
+
+// ---------- inteligencia de mercado: cifras del sector con fuente y fecha, comparación con tu análisis y diagnóstico ----------
+// Datos en market_intel.js (referencias de oct. 2026, no en tiempo real). Aquí solo se elige qué mostrar y se añaden acciones y sugerencias.
+function intelCtx(E) {
+  let D = null, quick = false;
+  if (E.ran) D = digest();
+  if (!D) { const q = dataFor(E); if (q && q.quick) { D = q.D; quick = true; } }
+  return { fam: E.fam || 'gen', seg: intelSeg(), D: D, quick: quick, has: !!D };
+}
+const IQ = { radar: ['vs', 'strat', 'trend'], vs: ['strat', 'trend', 'kpis'], trend: ['vs', 'wins', 'strat'], wins: ['vs', 'fail', 'strat'], fail: ['vs', 'wins', 'strat'], kpis: ['vs', 'trend', 'strat'], strat: ['vs', 'trend', 'wins'], live: ['radar', 'trend', 'vs'] };
+const IQ0 = { radar: ['trend', 'wins', 'kpis'], vs: ['radar', 'trend', 'kpis'], trend: ['wins', 'fail', 'kpis'], wins: ['trend', 'fail', 'kpis'], fail: ['wins', 'trend', 'kpis'], kpis: ['radar', 'trend', 'wins'], strat: ['radar', 'trend', 'wins'], live: ['radar', 'trend', 'kpis'] };
+const iqr = (cur, c) => (c.has ? IQ : IQ0)[cur].map((k) => Q[k]);
+const iNext = (c) => c.has ? '**Siguiente paso:** pulsa «' + Q.vs + '» y vemos cómo te afecta.' : '**Siguiente paso:** analiza tu idea en **Compite** y lo cruzo con tus cifras.';
+function iActs(ids, E, c, more) {
+  const a = (more || []).slice();
+  if (!c.has && E.v !== 'compite') a.push(ac('Analizar mi idea', 'compite'));
+  a.push({ l: 'Ver fuentes', fn: 'intelSrc', ids: (ids || []).join(',') });
+  return a.slice(0, 3);
+}
+const noD = (c) => !c.has;
+def('radar', ['radar', 5, 'datos del sector', 9, 'datos de mercado', 8, 'datos del mercado', 8, 'cifras del sector', 9, 'cifras de mercado', 8, 'cifras de mi sector', 10, 'como esta el mercado', 9, 'como esta mi sector', 10, 'como esta el sector', 9, 'benchmark*', 9, 'media del sector', 9, 'media del mercado', 8, 'valores normales', 7, 'cifras de referencia', 9, 'referencias del sector', 9, 'metricas del sector', 9, 'numeros del sector', 9, 'estadisticas del sector', 9, 'analiza mi sector', 10, 'analiza el sector', 9, /(cuanto|cual) (es|suele ser|seria) (lo )?(normal|habitual|tipico|comun)/, 8, 'que es normal en', 7], (E) => {
+  const c = intelCtx(E); const R = MI.radar(c.fam, c.seg, { has: c.has });
+  return { t: R.t, acts: iActs(R.ids, E, c), qr: iqr('radar', c), id: 'radar' };
+});
+def('vs', ['frente al mercado', 10, 'comparado con el mercado', 10, 'compara mis cifras', 11, 'comparar mis cifras', 11, 'comparame con el mercado', 11, 'como voy frente', 10, 'como estoy frente', 10, 'respecto al sector', 9, 'respecto al mercado', 9, 'mis cifras son buenas', 9, 'mis numeros son buenos', 9, 'estoy en la media', 8, 'compara mi cac', 10, 'comparame', 7, /(estoy|voy|esta|estan) (por encima|por debajo|en la media|dentro de la media|sobre la media)/, 9, /(es|son|esta|estan) (normal|normales|bien|mal|bueno|buena|buenos|buenas|alto|alta|altos|altas|bajo|baja|bajos|bajas|razonable|razonables) (mi|mis|el|la|los|las)\s*(cac|ltv|margen|margenes|conversion|churn|coste|costes|cifras|numeros)/, 10], (E) => {
+  const c = intelCtx(E); const V = c.has ? MI.versus(c.D, c.fam, c.seg) : null;
+  if (!V) { const R = MI.radar(c.fam, c.seg, { has: false }); return { t: J('Aún no tengo cifras tuyas que comparar: **cuéntame tu idea** o analízala en **Compite**.', 'Mientras, así está tu sector:', R.t.replace(/^## [^\n]*\n\n/, '')), acts: iActs(R.ids, E, c), qr: iqr('vs', c).concat([Q.myidea]).slice(0, 4), id: 'vs' }; }
+  return { t: J(V.t, c.quick ? QUICK : ''), acts: iActs(V.ids, E, c, E.ran ? [ac('Ajustar mi precio', { nav: 'est' })] : []), qr: iqr('vs', c), id: 'vs' };
+});
+def('trend', ['tendencia*', 6, 'tendencias de mi sector', 11, 'que tendencias hay', 10, 'que se lleva', 7, 'hacia donde va', 7, 'que esta pasando en mi sector', 11, 'que esta cambiando', 7, 'novedades del sector', 9, 'futuro del sector', 9, 'como evoluciona el sector', 10], (E) => {
+  const c = intelCtx(E); const R = MI.trends(c.fam, c.seg);
+  return { t: J(R.t, iNext(c)), acts: iActs(R.ids, E, c), qr: iqr('trend', c), id: 'trend' };
+});
+def('wins', ['patrones de exito', 11, 'casos de exito', 8, 'que hacen los que triunfan', 12, 'que hacen los que ganan', 12, 'que hacen los mejores', 10, 'buenas practicas', 8, 'claves del exito', 10, 'que funciona en mi sector', 11, 'formula del exito', 9, 'como triunfan', 9, 'que hacen los que lo consiguen', 11], (E) => {
+  const c = intelCtx(E); const R = MI.wins(c.fam);
+  return { t: J(R.t, iNext(c)), acts: iActs(R.ids, E, c), qr: iqr('wins', c), id: 'wins' };
+});
+def('fail', ['por que fracasan', 11, 'por que fracasa', 11, 'errores tipicos', 10, 'errores comunes', 10, 'errores frecuentes', 10, 'que suele salir mal', 10, 'por que cierran', 9, 'tasa de fracaso', 9, 'tasa de supervivencia', 10, 'cuantas empresas sobreviven', 11, 'cuantas startups fracasan', 11, 'causas de fracaso', 10, 'por que fallan', 9], (E) => {
+  const c = intelCtx(E); const R = MI.traps(c.fam);
+  return { t: J(R.t, iNext(c)), acts: iActs(R.ids, E, c), qr: iqr('fail', c), id: 'fail' };
+});
+def('kpis', ['kpis', 7, 'kpi', 7, 'que metricas debo', 10, 'que metricas sigo', 10, 'que metricas medir', 10, 'que debo medir', 9, 'que tengo que medir', 9, 'metricas clave', 9, 'indicadores clave', 9, 'numeros que importan', 9, 'cuadro de mando', 8, 'que numeros debo vigilar', 10], (E) => {
+  const c = intelCtx(E); const R = MI.kpis(c.fam, c.seg);
+  return { t: J(R.t, iNext(c)), acts: iActs(R.ids || [], E, c), qr: iqr('kpis', c), id: 'kpis' };
+});
+def('strategy', ['diagnostico estrategico', 12, 'diagnostico', 8, 'dame una estrategia', 11, 'estrategia para mi', 10, 'asesorame', 10, 'dime que hacer con mi negocio', 12, 'plan estrategico', 10, 'analisis estrategico', 11, 'consultor estrategico', 11, 'consultoria estrategica', 11, 'recomendaciones personalizadas', 11, 'que palancas', 10, 'como mejoro mi negocio', 10, 'hazme un diagnostico', 12, 'que harias en mi lugar', 11, 'que harias tu en mi lugar', 11, 'recomiendame una estrategia', 12, 'dame recomendaciones', 9, 'que me recomiendas', 7], (E) => {
+  const c = intelCtx(E);
+  if (!c.has) { const R = MI.radar(c.fam, c.seg, { has: false }); return { t: J('Para un **diagnóstico con datos de tu sector** necesito tu idea: qué vendes, a quién y cuánto cobrarías.', 'Mientras, esto es lo habitual en tu sector:', R.t.replace(/^## [^\n]*\n\n/, '')), acts: iActs(R.ids, E, c), qr: [Q.myidea].concat(iqr('strat', c)).slice(0, 4), id: 'strategy' }; }
+  const A = MI.advise(c.D, c.fam, c.seg); const last = A.seq[A.seq.length - 1];
+  if (c.quick) last.t = J(last.t, QUICK);
+  last.acts = iActs(A.ids, E, c, E.ran ? [ac('Ajustar mi precio', { nav: 'est' })] : []);
+  return { seq: A.seq, qr: iqr('strat', c), id: 'strategy' };
+});
+def('live', ['tiempo real', 10, 'datos actualizados', 10, 'de donde sacas los datos', 11, 'de donde salen los datos', 11, 'de donde salen estos datos', 11, 'de donde salen estas cifras', 11, 'fuentes de los datos', 10, 'cuando se actualizan', 10, 'estan actualizados', 10, 'son fiables', 8, 'datos fiables', 8, 'que fuentes usas', 10, 'fuentes de las cifras', 10, 'citas fuentes', 8], (E) => {
+  const c = intelCtx(E);
+  return { t: J(MI.honesty(c.fam)), acts: [{ l: 'Ver fuentes', fn: 'intelSrc', ids: MI.idsFor(c.fam).join(',') }], qr: iqr('live', c), id: 'live' };
+});
 
 // conversación sobre el negocio
 def('price', [/(precio|cobrar|cobro|tarifa|cuota|suscripcion|margen|cuanto (cobro|vale)|pricing|freemium|monetiz|ingresos|comision|honorarios)/, 3, 'cuanto debo cobrar', 6, 'cuanto deberia cobrar', 6, 'que precio pongo', 6, 'como defino mi precio', 8, 'cobrar*', 2, 'cobro', 2, 'precio', 3, 'precios', 3, 'tarifa', 3], (E) => {
@@ -10429,11 +13503,11 @@ def('price', [/(precio|cobrar|cobro|tarifa|cuota|suscripcion|margen|cuanto (cobr
   if (D && D.price) return { t: J(EX.topic('price', D).t, '**Consejos para ' + E.lab + ':**', adv), acts: [ac('Probar mi precio', { nav: 'est' })], id: 'price' };
   return { t: J('**Precio en ' + E.lab + '**', secLine('precios'), adv, factsLines(E)), acts: E.v === 'compite' && E.sub === 'precios' ? [] : [ac('Probar mi precio', 'compite')], id: 'price' };
 });
-def('arr', ['cuanto cuesta arrancar', 8, 'cuanto cuesta empezar', 8, 'cuanto cuesta montar', 8, 'cuanto cuesta lanzar', 8, /cuanto necesito para (empezar|arrancar|montar)/, 7, /costes? de (arrancar|empezar|lanzamiento)/, 6, 'inversion inicial', 4], (E) => ({ t: J('Suma tres cosas: **costes únicos** (alta, web, herramientas, producción o stock), **costes fijos** de 3 a 6 meses y **captación** de tus primeros clientes.', 'En ' + E.lab + ' pesan sobre todo: ' + kb(E).cost + '.', 'Lanza reúne trámites, costes y plazos orientativos; los importes son estimaciones, no presupuestos.'), acts: E.v === 'lanza' ? [] : [ac('Abrir Lanza', 'lanza')] }));
+def('arr', ['cuanto cuesta arrancar', 8, 'cuanto cuesta empezar', 8, 'cuanto cuesta montar', 8, 'cuanto cuesta lanzar', 8, /cuanto necesito para (empezar|arrancar|montar)/, 7, /costes? de (arrancar|empezar|lanzamiento)/, 6, 'inversion inicial', 4], (E) => ({ t: J('**Arrancar = 3 costes:**', B(['**Únicos:** alta, web, herramientas, producción o stock.', '**Fijos:** de 3 a 6 meses.', '**Captación** de tus primeros clientes.']), 'En ' + E.lab + ' pesan sobre todo: ' + kb(E).cost + '.', 'Lanza reúne trámites, costes y plazos. Los importes son estimaciones, no presupuestos.'), acts: E.v === 'lanza' ? [] : [ac('Abrir Lanza', 'lanza')] }));
 def('costs', ['coste', 2, 'costes', 2, 'presupuesto', 2, 'cuanto necesito', 3, 'cuantos clientes', 5, 'punto de equilibrio', 3, 'beneficio', 2, 'cuanto gano', 4, 'viabilidad economica', 4, 'cuantos clientes necesito', 8, 'ganar dinero', 3, 'cuanto dinero', 2], (E) => {
   let D = E.ran ? digest() : null; let quick = false;
   if (!D) { const q = dataFor(E); if (q && q.quick) { D = q.D; quick = true; } }
-  return { t: J('**Cuántos clientes necesitas** = costes fijos del mes ÷ lo que te queda de cada cliente tras los costes variables.', D && D.econ.be ? (quick ? 'Con tu idea: necesitas ≈ **' : 'En tu análisis: necesitas ≈ **') + D.econ.be + ' clientes** para cubrir costes fijos y con tu presupuesto alcanzarías ≈ **' + D.econ.reach + '**.' : 'En ' + (E.lab || 'tu modelo') + ' pesan sobre todo: ' + kb(E).cost + '.', 'El simulador de **Precio, público y posicionamiento** hace esa cuenta con tus números.', quick ? QUICK : ''), acts: E.v === 'compite' && E.sub === 'precios' ? [] : [ac('Abrir el simulador', E.ran ? { nav: 'est' } : 'compite')] };
+  return { t: J('**Clientes que necesitas = costes fijos del mes ÷ lo que te deja cada cliente.**', D && D.econ.be ? (quick ? 'Con tu idea: necesitas ≈ **' : 'En tu análisis: necesitas ≈ **') + D.econ.be + ' clientes** para cubrir costes. Con tu presupuesto llegas a ≈ **' + D.econ.reach + '**.' : 'En ' + (E.lab || 'tu modelo') + ' pesan sobre todo: ' + kb(E).cost + '.', 'El simulador de **Precio, público y posicionamiento** hace esa cuenta con tus números.', quick ? QUICK : ''), acts: E.v === 'compite' && E.sub === 'precios' ? [] : [ac('Abrir el simulador', E.ran ? { nav: 'est' } : 'compite')] };
 });
 def('aud', [/(publico|cliente ideal|buyer|\bpersona\b|target|segmento|a quien (vendo|me dirijo)|audiencia|nicho|perfil de cliente)/, 3.5, 'afinar mi publico', 8, 'publico objetivo', 5], (E) => ({ t: J('**Público en ' + E.lab + '**', B(kb(E).aud), E.f ? 'Canales habituales en tu modelo: ' + E.f.ch + '.' : ''), acts: E.v === 'compite' ? [] : [ac('Afinar mi público', 'compite')] }));
 def('comp', ['competenc*', 3.5, 'competidor*', 3.5, 'rival*', 3.5, 'diferenci*', 3, 'punto ciego', 3, 'hueco', 3, 'alternativa*', 2.5, 'me copien', 4, 'posicionamiento', 3, 'mapa', 1.5, 'como me diferencio', 8, 'explicame a mis rivales', 8, 'quien compite', 4, 'competir', 3, 'compit*', 3.5, 'con quien compito', 8, 'contra quien compito', 8, 'contra quien juego', 5, 'quien me hace sombra', 6], (E) => {
@@ -10443,12 +13517,12 @@ def('comp', ['competenc*', 3.5, 'competidor*', 3.5, 'rival*', 3.5, 'diferenci*',
   return { t: J('**Competencia en ' + E.lab + '**', secLine('competencia'), B(kb(E).comp), E.ran ? 'Tu informe de Compite ya tiene el mapa de competidores y huecos.' : 'Genera el informe en Compite para ver competidores reales de tu sector y sus huecos.'), acts: E.v === 'compite' ? [] : [ac('Abrir Compite', 'compite')] };
 });
 def('compworry', [/(competenc\w*|competidor\w*|rival\w*|gigantes?|grandes empresas|amazon|google).{0,40}(fuert\w*|dur\w*|grande\w*|much\w*|agresiv\w*|enorm\w*|imposible|asust\w*|preocup\w*|dominan|copi\w*|ganan)/, 9, /(ya existe|ya hay (algo|alguien|muchos)|alguien (ya )?lo hace|me (van a|pueden) copiar|no puedo competir|como (le )?gano|como compito|como competir|tengo mucha competencia|hay mucha competencia)/, 8], (E) => {
-  const D = E.ran ? digest() : null; const lead = 'Que haya competencia suele ser **buena señal**: significa que hay clientes dispuestos a pagar. Lo que importa es **dónde flojean** y si puedes ofrecer algo distinto.';
+  const D = E.ran ? digest() : null; const lead = '**Que haya competencia es buena señal:** hay clientes dispuestos a pagar. Lo que importa es dónde flojean y qué haces distinto.';
   if (D && D.nC) {
     const r = D.comps[0];
-    return { t: J(lead, '**En tu análisis:** hay ' + D.nC + (D.nC === 1 ? ' rival' : ' rivales') + '; el mayor, ' + r.name + ', se lleva ≈ ' + D.F.fn(r.share, r.share % 1 ? 1 : 0) + ' % y los tres primeros suman ≈ ' + D.F.fn(D.top3, 0) + ' %' + (D.top3 >= 50 ? ' (mercado concentrado: entra por un nicho concreto).' : ' (queda sitio).'), 'Tu hueco: precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**.', B(kb(E).comp), 'No compitas en todo: elige **un** cliente y **una** ventaja que se vea.'), acts: [ac('Ver competidores', { nav: 'eco' })].concat(E.v === 'compite' ? [] : [ac('Abrir Compite', 'compite')]), qr: [Q.price, Q.risks, Q.first], id: 'compworry' };
+    return { t: J(lead, '**En tu análisis:** ' + D.nC + (D.nC === 1 ? ' rival' : ' rivales') + '. El mayor, ' + r.name + ', pesa ≈ ' + D.F.fn(r.share, r.share % 1 ? 1 : 0) + ' %; los 3 primeros suman ≈ ' + D.F.fn(D.top3, 0) + ' %' + (D.top3 >= 50 ? ' (mercado concentrado: entra por un nicho).' : ' (queda sitio).'), 'Tu hueco: precio **' + D.gap.pl + '** y personalización **' + D.gap.sl + '**.', B(kb(E).comp), '**Siguiente paso:** elige **un** cliente y **una** ventaja que se vea.'), acts: [ac('Ver competidores', { nav: 'eco' })].concat(E.v === 'compite' ? [] : [ac('Abrir Compite', 'compite')]), qr: [Q.price, Q.risks, Q.first], id: 'compworry' };
   }
-  return { t: J(lead, B(kb(E).comp), 'No compitas en todo: elige **un** cliente y **una** ventaja que se vea.', E.ran ? '' : 'En Compite verás los rivales de tu sector, cuánto pesan y dónde está tu hueco.'), acts: E.v === 'compite' ? [] : [ac('Analizar mi competencia', 'compite')], qr: [Q.comp, Q.val, Q.chan], id: 'compworry' };
+  return { t: J(lead, B(kb(E).comp), '**Siguiente paso:** elige **un** cliente y **una** ventaja que se vea.', E.ran ? '' : 'En Compite verás los rivales de tu sector, cuánto pesan y dónde está tu hueco.'), acts: E.v === 'compite' ? [] : [ac('Analizar mi competencia', 'compite')], qr: [Q.comp, Q.val, Q.chan], id: 'compworry' };
 });
 def('ads', ['coste de captar', 4, 'captar clientes', 2, 'anuncios', 2, 'publicidad', 2.5, 'cuesta captar', 4, 'caro captar', 5, 'explicame el coste de captar clientes', 12, 'coste por registro', 4, 'por que sale caro', 4], (E) => { const D = E.ran ? digest() : null; if (!D) return conceptReply('cac', null, E); return Object.assign(EX.topic('ads', D), { id: 'ads', concept: 'cac', qr: [Q.cac, Q.chan, Q.first] }); });
 def('risk', ['riesgo*', 4, 'peligro*', 3, 'amenaza*', 3, 'que puede salir mal', 6, 'explicame los riesgos', 10, 'que riesgos', 5, 'puntos debiles', 3], (E) => {
@@ -10468,39 +13542,52 @@ def('chk', ['checklist', 4, /\bcro\b/, 3, 'mejorar la conversion', 5, 'convierte
 def('cta', [/\bcta\b/, 4, 'boton', 3, 'llamada a la accion', 5, 'un boton que convierta', 8], (E) => ({ t: J('**Botón principal** en ' + E.lab + ':', B(['Verbo + beneficio, sin «Enviar» ni «Click aquí». Ideas: ' + kb(E).cta.join(' o ') + '.', 'Uno solo, repetido arriba y al final.', 'Di qué pasa después («Te escribo en 24 h») y, si es verdad, «sin tarjeta».'])), acts: E.v === 'genera' ? [] : [ac('Abrir Genera', 'genera')] }));
 def('h1', ['titular', 4, 'headline', 4, /\bhero\b/, 4, 'mejorar mi titular', 8, 'texto principal', 2], (E) => ({ t: J('Un buen titular responde en una línea: **qué consigo, para quién y sin qué fricción**.', secLine('genera'), B([kb(E).land[0], 'Evita la jerga y las promesas que no puedas cumplir.']), 'Fórmula para rellenar con tus palabras: ' + HL + '.', 'Prueba dos versiones en Genera y quédate con la que retenga más.'), acts: E.v === 'genera' ? [] : [ac('Abrir Genera', 'genera')] }));
 def('land', ['landing', 3, 'copy', 2, 'texto de la web', 4, 'convertir', 2.5, 'prueba social', 4, 'testimonio*', 3, 'pagina de captacion', 4, 'conversion', 1.5, 'mi web', 2.5, 'pagina web', 2.5], (E) => ({ t: J('**Landing en ' + E.lab + '**', B(kb(E).land), 'Fórmula de titular: ' + HL + '.'), acts: E.v === 'genera' ? [] : [ac('Abrir Genera', 'genera')] }));
-def('trust', ['confianza', 3, 'confien', 3.5, 'credibilidad', 4, 'resenas', 3, 'transmitir', 3, 'fiarse', 3, 'que la gente confie', 6, 'marca nueva', 3, 'sin pruebas', 3], (E) => ({ t: J('Una marca nueva parte con **desventaja de confianza**; se compensa con pruebas visibles:', B(['Testimonios o casos reales (aunque sean pocos); si no los tienes, **explica tu método** y quién eres.', 'Una **garantía simple** (devolución, prueba o primera sesión gratis).', 'Datos concretos y verificables en vez de promesas grandes.', kb(E).land[kb(E).land.length > 2 ? 2 : 0]]), 'Ponlos cerca del botón principal de tu landing.'), acts: E.v === 'genera' ? [] : [ac('Abrir Genera', 'genera')], qr: [Q.h1, Q.chk, Q.risk] }));
+def('trust', ['confianza', 3, 'confien', 3.5, 'credibilidad', 4, 'resenas', 3, 'transmitir', 3, 'fiarse', 3, 'que la gente confie', 6, 'marca nueva', 3, 'sin pruebas', 3], (E) => ({ t: J('**Una marca nueva parte sin confianza. Se compensa con pruebas visibles:**', B(['Testimonios o casos reales (aunque sean pocos); si no los tienes, **explica tu método** y quién eres.', 'Una **garantía simple** (devolución, prueba o primera sesión gratis).', 'Datos concretos y verificables en vez de promesas grandes.', kb(E).land[kb(E).land.length > 2 ? 2 : 0]]), 'Ponlos cerca del botón principal de tu landing.'), acts: E.v === 'genera' ? [] : [ac('Abrir Genera', 'genera')], qr: [Q.h1, Q.chk, Q.risk] }));
 def('enc', [/(que (pongo|preguntar|incluyo) en (la|el) (encuesta|cuestionario)|preguntas de la encuesta|que preguntas)/, 5, 'que pongo en la encuesta', 8], (E) => ({ t: J('Una buena encuesta de validación es **corta** (5 a 7 preguntas):', B(['Qué problema tiene hoy la persona y cómo lo resuelve.', 'Cuánto usaría o contrataría lo que propones, de 0 a 10.', 'Cuánto pagaría (rangos, no cifras abiertas).', 'Qué le frenaría. Pregunta abierta: es la que más enseña.']), 'Valida ya mide intención alta y quién pagaría; añade la pregunta de qué le frenaría.'), acts: E.v === 'valida' ? [] : [ac('Abrir Valida', 'valida')] }));
-def('survey', [/(cuantas (encuestas|respuestas|personas)|tamano de la muestra|muestra minima)/, 5, 'cuantas encuestas necesito', 8, 'encuestas', 1.5, 'cuestionario', 2], (E) => ({ t: J('Con menos de 30 respuestas la señal todavía no es fiable. Para **' + E.lab + '** el mínimo orientativo es **' + LV.THR.n + '**.', 'Consigue las respuestas de gente de tu público real (no solo amigos), y mira la intención alta y cuántos pagarían.'), acts: E.v === 'valida' ? [] : [ac('Abrir Valida', 'valida')] }));
+def('survey', [/(cuantas (encuestas|respuestas|personas)|tamano de la muestra|muestra minima)/, 5, 'cuantas encuestas necesito', 8, 'encuestas', 1.5, 'cuestionario', 2], (E) => ({ t: J('**Con menos de 30 respuestas, la señal aún no es fiable.** Para ' + E.lab + ', el mínimo orientativo es **' + LV.THR.n + '**.', 'Pregunta a gente de tu público real (no solo amigos) y mira la intención alta y cuántos pagarían.'), acts: E.v === 'valida' ? [] : [ac('Abrir Valida', 'valida')] }));
 def('metrics', ['metric*', 2.5, 'criterio*', 3, 'go no go', 5, 'veredicto', 3, 'umbral*', 3, 'minimo orientativo', 5, 'como leo', 4, 'interpret*', 2.5, 'indicador*', 3, 'kpi', 3, 'resultados', 1.5, 'como leo los criterios', 8, 'conversion de', 2], (E) => {
   if (!E.data) return { t: J('Estas son las métricas que sigo en **' + E.lab + '**:', B(E.p.c), 'Aún no hay datos: ' + stateLine(E).replace(/^Aún no hay datos de demanda: /, '')) };
   const nm = { ok: 'cumple', warn: 'casi', risk: 'por debajo' };
   return { t: J('Así van tus criterios en **' + E.lab + '**:', B(E.vd.cs.map((c) => c.label + ': **' + c.show + '** (' + c.goal + ') · ' + nm[c.st])), stateLine(E)) };
 });
-def('demo', [/(modo demo|datos de ejemplo|datos simulados|cifras simuladas|datos falsos|por que (hay|salen) (datos|cifras)|sin datos|no hay datos|resultados reales|anotar (mis )?resultados|como anoto|donde pongo (mis )?(resultados|cifras))/, 5, 'como anoto mis resultados', 8], (E) => ({ t: J('Aquí **no hay datos de ejemplo**: el panel empieza vacío y solo muestra lo que tú anotes.', 'Cuando publiques tu landing y recibas respuestas, abre **Valida → «Resultados de tu validación»** y escribe las visitas, los registros, las encuestas, la intención alta y las personas que pagarían. Con eso calculo tu veredicto Go / No-Go.', E.data ? 'Ya has anotado resultados reales.' : 'Todavía no has anotado ninguno.'), acts: E.v === 'valida' ? [] : [ac('Ir a Valida', 'valida')], qr: [Q.crit, Q.n, Q.next], id: 'results' }));
-def('soc', [/(autonomo (o|vs|contra) (sociedad|sl)|sociedad (o|vs) autonomo|\bsl\b|sociedad limitada|forma juridica|como (me )?constituyo)/, 6, 'autonomo o sociedad', 8], (E) => ({ t: J('Orientación general: **autónomo** es lo más rápido y barato para empezar y validar; una **sociedad (SL)** suele compensar cuando hay socios, riesgo patrimonial relevante o ingresos estables y altos.', 'Mucha gente valida primero como autónoma y pasa a sociedad después.', E.fam === 'trade' ? 'En un proyecto financiero, la forma depende también de si tu actividad necesita autorización: consúltalo antes con un profesional.' : 'Lanza reúne los costes y plazos de cada opción. Esto no es asesoramiento legal: confírmalo con un gestor.'), acts: E.v === 'lanza' ? [] : [ac('Abrir Lanza', 'lanza')] }));
+def('demo', [/(modo demo|datos de ejemplo|datos simulados|cifras simuladas|datos falsos|por que (hay|salen) (datos|cifras)|sin datos|no hay datos|resultados reales|anotar (mis )?resultados|como anoto|donde pongo (mis )?(resultados|cifras))/, 5, 'como anoto mis resultados', 8], (E) => ({ t: J('**No hay datos de ejemplo:** el panel empieza vacío y solo muestra lo que tú anotes.', 'Cuando tengas respuestas, abre **Valida → «Resultados de tu validación»** y anota visitas, registros, encuestas, intención alta y quién pagaría. Con eso calculo tu veredicto Go / No-Go.', E.data ? 'Ya has anotado resultados reales.' : 'Todavía no has anotado ninguno.'), acts: E.v === 'valida' ? [] : [ac('Ir a Valida', 'valida')], qr: [Q.crit, Q.n, Q.next], id: 'results' }));
+def('soc', [/(autonomo (o|vs|contra) (sociedad|sl)|sociedad (o|vs) autonomo|\bsl\b|sociedad limitada|forma juridica|como (me )?constituyo)/, 6, 'autonomo o sociedad', 8], (E) => ({ t: J('**Para empezar, autónomo suele ser lo más rápido y barato.** Una **sociedad (SL)** compensa con socios, riesgo patrimonial o ingresos altos y estables.', 'Mucha gente valida como autónoma y pasa a sociedad después.', E.fam === 'trade' ? 'En un proyecto financiero, la forma depende también de si tu actividad necesita autorización: consúltalo antes con un profesional.' : 'Lanza reúne los costes y plazos de cada opción. Esto no es asesoramiento legal: confírmalo con un gestor.'), acts: E.v === 'lanza' ? [] : [ac('Abrir Lanza', 'lanza')] }));
 def('legal', ['tramite*', 3.5, 'autonomo*', 3, 'sociedad', 2.5, 'impuesto*', 3.5, /\biva\b/, 3.5, 'hacienda', 3.5, 'licencia', 3, 'rgpd', 4, 'privacidad', 1.5, 'cnmv', 4, 'legal*', 2.5, 'contrato*', 3, 'alta como', 3, 'factura*', 3, 'aviso legal', 4, 'cookies', 3, 'pagar impuestos', 5, 'seguridad social', 4], (E) => ({ t: J('**Trámites en ' + E.lab + '**', B(kb(E).legal.concat(E.f && E.f.al && ['info', 'colab'].indexOf(E.fam) >= 0 ? ['Ojo en tu modelo: ' + E.f.al.charAt(0).toLowerCase() + E.f.al.slice(1) + '.'] : [])), 'Es orientación general, no asesoramiento legal ni financiero: consúltalo con un profesional.'), acts: E.v === 'lanza' ? [] : [ac('Abrir Lanza', 'lanza')] }));
 def('lzm', ['paso de mi modelo', 5, 'tramite de mi modelo', 5, 'explicame el paso de mi modelo', 9], (E) => ({ t: E.p.lz ? J('Para **' + E.lab + '** añadí el paso **' + E.p.lz[1] + '**.', E.p.note || 'Es una tarea orientativa: confírmalo con un profesional antes de actuar.') : 'Tu modelo no tiene un paso propio en Lanza; usa la ruta general.' }));
 def('chan', ['primeros clientes', 5, 'conseguir clientes', 5, 'consigo clientes', 6, 'encontrar clientes', 5, 'atraer clientes', 5, 'busco clientes', 4, 'como consigo clientes', 9, 'marketing', 3, 'redes sociales', 2.5, 'instagram', 2, 'tiktok', 2, 'seo', 2, 'vender mas', 3.5, 'darme a conocer', 5, 'promocionar*', 3.5, 'difundir', 2.5, 'captacion', 2.5, 'como consigo mis primeros clientes', 10, 'primeras ventas', 5, 'donde encuentro clientes', 5, 'llegar a la gente', 4, 'como vendo', 4, /(primer\w*|conseguir|consigo|captar|atraer|encontrar|busco|llegar a)\s+(\w+\s+)?(alumnos|usuarios|pacientes|compradores|suscriptores|socios|miembros|reservas|pedidos)/, 7], (E) => {
   const f = E.f; const D = E.ran ? digest() : null;
-  return { t: J('**Tus primeros 10 clientes** casi nunca llegan por publicidad. Sigue este orden:', B(['**Tu círculo y comunidades** donde ya está tu cliente (grupos, foros, redes).', f && f.ch ? '**Canales típicos de ' + E.lab + ':** ' + f.ch + '.' : '**Un solo canal** donde esté tu público: elige uno y úsalo bien.', '**Conversaciones 1 a 1:** escribe a 20 personas del perfil y pídeles 15 minutos.', '**Una landing con lista de espera** para recoger interesados.']), D && D.ads.verdict === 'risk' ? 'En tu análisis, captar solo con anuncios sale caro (≈ ' + eur(D.ads.cacAds) + ' por cliente): empieza por canales gratuitos.' : 'Mide cuál te trae gente que después paga.'), acts: [ac('Crear mi landing', 'genera')], qr: [Q.val, Q.aud, Q.price] };
+  return { t: J('**Tus primeros 10 clientes casi nunca llegan por publicidad.** Sigue este orden:', B(['**Tu círculo y comunidades** donde ya está tu cliente (grupos, foros, redes).', f && f.ch ? '**Canales típicos de ' + E.lab + ':** ' + f.ch + '.' : '**Un solo canal** donde esté tu público: elige uno y úsalo bien.', '**Conversaciones 1 a 1:** escribe a 20 personas del perfil y pídeles 15 minutos.', '**Una landing con lista de espera** para recoger interesados.']), D && D.ads.verdict === 'risk' ? 'En tu análisis, los anuncios salen caros (≈ ' + eur(D.ads.cacAds) + ' por cliente): empieza por canales gratuitos.' : 'Mide cuál te trae gente que después paga.'), acts: [ac('Crear mi landing', 'genera')], qr: [Q.val, Q.aud, Q.price] };
 });
-def('validate', ['como valido', 5, 'validar mi idea', 5, 'como se si', 4, 'comprobar', 2, 'probar mi idea', 4, 'validacion', 2.5, 'sin gastar', 3, 'como valido mi idea sin gastar', 12, 'validar', 3, 'sin invertir', 2], (E) => ({ t: J('## Validar sin gastar', 'La idea es **aprender barato** antes de construir:', B(['**Habla con 10 personas** de tu público: qué problema tienen y cómo lo resuelven hoy.', '**Crea una landing** con tu propuesta y una lista de espera (en Genera).', '**Pide un compromiso:** preventa, reserva o un pago simbólico.', '**Mide en Valida:** visitas, registros, intención alta y cuántos pagarían. Mínimos orientativos para ' + E.lab + ': ' + pc(LV.THR.conv, 0) + ' de registro y ' + LV.THR.n + ' respuestas.']), 'Si los números acompañan, sigues. Si no, ajustas la idea sin haber gastado.'), acts: [ac('Crear mi landing', 'genera'), ac('Ir a Valida', 'valida')], qr: [Q.chan, Q.enc, Q.n] }));
+def('validate', ['como valido', 5, 'validar mi idea', 5, 'como se si', 4, 'comprobar', 2, 'probar mi idea', 4, 'validacion', 2.5, 'sin gastar', 3, 'como valido mi idea sin gastar', 12, 'validar', 3, 'sin invertir', 2], (E) => ({ t: J('## Validar sin gastar', '**Aprende barato antes de construir.** Así:', B(['**Habla con 10 personas** de tu público: qué problema tienen y cómo lo resuelven hoy.', '**Crea una landing** con tu propuesta y una lista de espera (en Genera).', '**Pide un compromiso:** preventa, reserva o un pago simbólico.', '**Mide en Valida:** visitas, registros, intención alta y cuántos pagarían. Mínimos orientativos para ' + E.lab + ': ' + pc(LV.THR.conv, 0) + ' de registro y ' + LV.THR.n + ' respuestas.']), 'Si los números acompañan, sigues. Si no, ajustas sin haber gastado.'), acts: [ac('Crear mi landing', 'genera'), ac('Ir a Valida', 'valida')], qr: [Q.chan, Q.enc, Q.n] }));
 def('after', ['despues de validar', 6, 'tras validar', 6, 'que hago despues', 4, 'ya valide', 5, 'ya he validado', 5, 'y si sale bien', 4, 'y si sale mal', 3, 'siguiente fase', 3], (E) => ({ t: J('Depende del veredicto de Valida:', B(['**Go:** pasa a **Lanza** (trámites y costes) y a **Genera** (landing definitiva).', 'Casi: ajusta el punto más débil (titular, precio o público) y **vuelve a medir**.', '**No-Go:** no es un fracaso, es dinero ahorrado: cambia el público, el precio o la propuesta y prueba otra vez.']), stateLine(E)), acts: [ac('Ir a Valida', 'valida')], qr: [Q.crit, Q.n, Q.tram] }));
 def('phases', [/((4|cuatro) fases|las fases|como funciona (la app|el panel))/, 5, 'explicame las 4 fases', 9], (E) => ({ t: phases(E) }));
 def('progress', ['como voy', 5, 'mi progreso', 5, 'progreso', 3, 'avance', 2.5, 'en que fase', 4, /resumen del (proyecto|panel)/, 5, 'estado del proyecto', 5], (E) => ({ t: J('Progreso total: **' + E.pr.total + ' %** · ' + LV.phaseText() + '.', B(['Valida: ' + E.pr.valida + ' %', 'Compite: ' + E.pr.compite + ' %', 'Lanza: ' + E.pr.lanza + ' %', 'Genera: ' + E.pr.genera + ' %'])) }));
 def('next', ['por donde empiezo', 6, 'donde empiezo', 5, 'siguiente paso', 5, 'proximo paso', 5, /que (hago|me falta|toca|sigue|debo hacer)/, 3.5, 'primer paso', 4, 'que priorizo', 4, 'prioridad', 2, 'que me falta', 8, 'que hago', 2], (E) => nextReply(E));
-def('idea', ['describir', 3, 'describo', 3, 'mi idea', 2, 'que escribo', 5, 'que pongo', 4, /como (relleno|describo)/, 5, 'ejemplo de idea', 4, /no se (que|como) (escribir|poner)/, 5, 'texto libre', 3, 'que escribo aqui', 9], (E) => ({ t: J('Escribe tu idea como se la contarías a un amigo e incluye, si puedes:', B(['**Qué vendes** y a quién.', '**Cuánto cobrarías** y cómo (' + (E.f ? E.f.earn.toLowerCase() : 'suscripción, por venta, por hora') + ').', 'Tu **presupuesto** y cómo llegarás a la gente.']), E.p.hero ? 'Guía para tu modelo: ' + E.p.hero : '', '¿Prefieres que te haga unas preguntas para ayudarte a escribirla?'), acts: E.v === 'compite' ? [ac(Q.disc, { q: Q.disc })] : [ac('Ir a Compite', 'compite'), ac(Q.disc, { q: Q.disc })] }));
+def('idea', ['describir', 3, 'describo', 3, 'mi idea', 2, 'que escribo', 5, 'que pongo', 4, /como (relleno|describo)/, 5, 'ejemplo de idea', 4, /no se (que|como) (escribir|poner)/, 5, 'texto libre', 3, 'que escribo aqui', 9], (E) => ({ t: J('**Escribe tu idea como a un amigo.** Incluye, si puedes:', B(['**Qué vendes** y a quién.', '**Cuánto cobrarías** y cómo (' + (E.f ? E.f.earn.toLowerCase() : 'suscripción, por venta, por hora') + ').', 'Tu **presupuesto** y cómo llegarás a la gente.']), E.p.hero ? 'Guía para tu modelo: ' + E.p.hero : '', '¿Prefieres que te haga unas preguntas para ayudarte a escribirla?'), acts: E.v === 'compite' ? [ac(Q.disc, { q: Q.disc })] : [ac('Ir a Compite', 'compite'), ac(Q.disc, { q: Q.disc })] }));
 def('help', [/(ayuda|explica(me)? (esto|esta pantalla|este modulo|el modulo)|que (es|hace) (esto|este modulo|esta pantalla)|donde estoy|para que sirve (esto|el panel))/, 4, 'ayuda', 2], (E) => ({ t: explainMod(E.v, E) }));
 // seguimientos del hilo
 def('again', [/(repitelo|repite|repiteme|repetir|otra vez|de nuevo|y eso|eso que|que significa eso|que quieres decir|no lo entiendo|no entiendo|explicamelo|mas facil|mas sencillo|mas claro|con otras palabras|en palabras (simples|sencillas)|como si tuviera|resumelo|en una frase|mas corto)/, 5, 'y eso que significa', 8, 'explicamelo mas facil', 9, 'no lo entiendo', 6], (E, X) => againReply(E, X));
 def('example', ['dame un ejemplo', 8, 'un ejemplo', 4, 'ejemplo', 3, 'ponme un ejemplo', 8, 'por ejemplo', 2, 'como seria', 3], (E) => exampleReply(E));
 def('more', ['mas detalle', 6, 'cuentame mas', 7, 'amplia', 4, 'profundiza', 6, 'y que mas', 5, 'mas informacion', 5, 'sigue', 3, 'continua', 3, 'dime mas', 6, 'algo mas', 4], (E) => moreReply(E));
+
+/** Añade a una respuesta ya existente una cifra de referencia de su sector (con fuente) si hay una relevante para el tema. */
+function withRef(id, topic) {
+  const i0 = IT.find((x) => x.id === id); if (!i0) return; const f0 = i0.fn;
+  i0.fn = function (E, X, c) {
+    const R = f0(E, X, c);
+    try { if (R && R.t && !R.seq && !/Dato del sector/.test(R.t)) { const L = MI.line(E.fam, topic); if (L) R.t = J(R.t, '**Dato del sector:** ' + L); } } catch (e) { /* sin referencia */ }
+    return R;
+  };
+}
+withRef('price', 'price'); withRef('ads', 'ads'); withRef('costs', 'costs'); withRef('chan', 'chan'); withRef('chk', 'land'); withRef('land', 'land');
 // cierre: lo que no se entiende
 const OUT = /(capital de|quien (es|fue|era)|cuantos anos tiene|clima|tiempo hace|receta de|chiste|cancion|futbol|partido|presidente|pelicula|serie de|horoscopo|bitcoin|musica)/;
 
 // ---------- respuestas con estado ----------
 function nextReply(E) {
-  if (E.v === 'modelo' && !E.k) return { t: 'Primero elige el tipo de negocio y pulsa **«Continuar con este modelo»**. Después te digo cuál es el siguiente paso. Si no sabes cuál, **cuéntame tu idea** o pulsa «No sé por dónde empezar».', qr: [Q.lost, '¿Cuál me conviene?'] };
+  if (E.v !== 'modelo') { const rr = CO() && CO().nextReply(E); if (rr) return rr; }
+  if (E.v === 'modelo' && !E.k) return { t: '**Primero elige tu tipo de negocio** y pulsa **«Continuar con este modelo»**. Luego te digo el siguiente paso. ¿Dudas? **Cuéntame tu idea** o pulsa «No sé por dónde empezar».', qr: [Q.lost, '¿Cuál me conviene?'] };
+  if (E.v === 'hub') { const r = hubRec(); if (r) return { t: J('**' + (r.src === 'estado' ? 'Te sugiero seguir por ' : 'Te recomiendo empezar por ') + r.title + '.**', r.why, 'Puedes abrir cualquier módulo: ninguno bloquea a los demás.'), acts: [hubAct(r)], qr: [Q.mods, Q.myidea] }; }
   const c = nextCheck();
   if (!c) return { t: 'Has completado todos los pasos del panel. Revisa el veredicto y decide si lanzas.' };
   return { t: J('**Siguiente paso:** ' + c.label + ' (en ' + MODS[c.m] + ').', 'Llevas **' + E.pr.total + ' %** del proyecto.'), acts: [ac('Ir a ' + MODS[c.m], c.m)] };
@@ -10563,7 +13650,7 @@ function exampleReply(E) {
   const l = st.d.last || {};
   const guide = E.p.hero ? 'Guía para tu modelo: ' + E.p.hero : '';
   const head = E.v === 'genera' || l.id === 'h1' || l.id === 'land';
-  if (!head && !l.concept) return { t: J('No voy a inventarte un proyecto: **el que cuenta es el tuyo**. Te dejo la estructura para **' + (E.lab || 'tu modelo') + '**, rellénala con tus datos:', TPL, guide, '¿Prefieres que te haga las preguntas una a una?'), qr: [Q.mine, Q.price, Q.aud] };
+  if (!head && !l.concept) return { t: J('**No te invento un proyecto: el que cuenta es el tuyo.** Esta es la estructura para **' + (E.lab || 'tu modelo') + '**:', TPL, guide, '¿Prefieres que te haga las preguntas una a una?'), qr: [Q.mine, Q.price, Q.aud] };
   if (l.concept && K.GLOSS[l.concept]) { const D = digest(); const p = D ? EX.concept(l.concept, D) : null; return { t: J(ANALOGY[l.concept] || K.GLOSS[l.concept].d, 'Cuando tengas tu análisis, te lo muestro con tus cifras.'), qr: defaults(E), id: 'example' }; }
   return { t: J('Fórmula de titular para ' + (E.lab || 'tu modelo') + ': ' + HL + '.', 'Pon tus propias palabras: así sonará a ti y no a una plantilla.'), qr: defaults(E) };
 }
@@ -10578,8 +13665,16 @@ function moreReply(E) {
 function explainData(E) {
   if (E.v === 'valida' || (E.v === 'panel' && !E.ran)) return { t: J('Estos son los datos de **Valida**, explicados sin jerga:', explainMod('valida', E), stateLine(E)), qr: [Q.crit, Q.n, Q.res], id: 'metrics' };
   const D = E.ran ? digest() : null;
-  if (!D) return { t: J(E.v === 'compite' ? 'Aún no hay informe que explicar: genera tu análisis y te lo cuento **en lenguaje sencillo**, con lo que significa cada cifra para tu proyecto.' : 'Los datos de mercado, rivales, precio y riesgos están en **Compite**. Cuando generes tu análisis, te los explico en lenguaje llano.', 'Mientras tanto puedo contarte qué vas a recibir o ayudarte a escribir tu idea.'), acts: [ac(E.v === 'compite' ? Q.disc : 'Ir a Compite', E.v === 'compite' ? { q: Q.disc } : 'compite')], qr: [Q.tam, Q.disc], id: 'explain' };
+  if (!D) return { t: J(E.v === 'compite' ? 'Aún no hay informe. **Genera tu análisis** y te explico cada cifra en lenguaje sencillo.' : 'Mercado, rivales, precio y riesgos están en **Compite**. Genera tu análisis y te los explico en lenguaje llano.', 'Mientras tanto puedo contarte qué vas a recibir o ayudarte a escribir tu idea.'), acts: [ac(E.v === 'compite' ? Q.disc : 'Ir a Compite', E.v === 'compite' ? { q: Q.disc } : 'compite')], qr: [Q.tam, Q.disc], id: 'explain' };
   const S3 = EX.summary(D);
+  try { // proactivo: si una cifra tuya se aleja de lo habitual en tu sector, Astro lo dice y ofrece compararlo
+    const nz1 = MI.nudge(D, E.fam, intelSeg());
+    if (nz1) {
+      const last = S3.seq[S3.seq.length - 1], line = '**Frente al mercado:** ' + nz1.t;
+      last.t = /\*\*Siguiente paso:/.test(last.t) ? last.t.replace(/\*\*Siguiente paso:/, line + '\n\n**Siguiente paso:') : J(last.t, line);
+      S3.qr = [Q.vs].concat((S3.qr || []).filter((x) => x !== Q.vs)).slice(0, 5);
+    }
+  } catch (e) { /* sin referencias de sector */ }
   return { seq: S3.seq, qr: S3.qr, id: 'summary', concept: 'viab' };
 }
 // ---------- texto libre: respuestas personalizadas con los datos del proyecto ----------
@@ -10635,15 +13730,15 @@ function estFor(price) {
 /** Falta la idea: se explica por qué hace falta y se deja preparada la siguiente frase como idea. */
 function noIdea(E, lead, tip) {
   st.d.pend = { kind: 'idea' };
-  return { t: J(lead, tip, 'Cuéntame tu idea en una frase (**qué vendes, a quién y cuánto cobrarías**) y te lo calculo con tus datos.'), qr: [Q.disc, Q.price, Q.next], id: 'smart-noidea' };
+  return { t: J(lead, tip, '**Siguiente paso:** cuéntame tu idea en una frase (qué vendes, a quién y cuánto cobrarías) y lo calculo.'), qr: [Q.disc, Q.price, Q.next], id: 'smart-noidea' };
 }
 const tail = (o) => (o && o.assumed ? 'Ojo: tu texto no indica precio, así que parto del valor típico de tu modelo (' + o.base.priceTxt + ').' : '');
-const SIM = 'Son estimaciones con las hipótesis de Compite, no una promesa: contrástalas con clientes reales en Valida.';
+const SIM = 'Son estimaciones, no promesas. Contrástalas con clientes reales en Valida.';
 
 // --- precio ---
 function sPrice(X, E, pr) { // «¿y si cobro 39 €?»
   const o = estFor(pr.v), k = kb(E);
-  if (!o) return noIdea(E, 'Para decirte qué pasa con **' + eur(pr.v) + '** necesito saber **qué vendes y a quién**: el mismo precio es barato en un sector y caro en otro.', E.k ? 'En ' + E.lab + ': ' + lc(k.price[0]) : '');
+  if (!o) return noIdea(E, 'Para valorar **' + eur(pr.v) + '** necesito saber **qué vendes y a quién**: el mismo precio es barato en un sector y caro en otro.', E.k ? 'En ' + E.lab + ': ' + lc(k.price[0]) : '');
   const a = o.alt || o.base, b = o.base, same = Math.abs(a.priceVal - b.priceVal) < 1e-9;
   const lines = [];
   if (a.band) lines.push('**Mercado:** ' + a.band.lo + ' a ' + a.band.hi + (a.band.mid ? ' (típico ≈ ' + a.band.mid + ')' : '') + ' → **' + (a.tier ? a.tier.l.toLowerCase() : 'sin referencia') + '**.');
@@ -10658,8 +13753,8 @@ function sPriceView(X, E) { // «¿mi precio es muy alto/bajo?»
   const o = estFor(0); if (!o) return null;
   const b = o.base, k = kb(E); if (!b.band) return null;
   const hi = b.tier && /high|prem/.test(b.tier.id), lo = b.tier && /low|entry/.test(b.tier.id);
-  const verdict = hi ? 'Estás por encima de la mayoría: no es un error, pero **necesitas motivos visibles** para cobrar eso.' : lo ? 'Estás en la parte baja: atraes por precio, pero **te cuesta cubrir costes** y puedes parecer de poca calidad.' : 'Estás en el rango donde compra la mayoría: el precio **no es tu problema principal**; diferénciate por servicio o especialización.';
-  return { t: J('## Tu precio frente al mercado', B(['Partes de **' + b.priceTxt + '** (' + lc(b.priceLabel) + ').', 'El mercado cobra de **' + b.band.lo + '** a **' + b.band.hi + '** (típico ≈ ' + b.band.mid + ').', '**' + b.tier.l + '.**']), verdict, secLine('precios'), 'Consejo para ' + E.lab + ': ' + lc(k.price[0]), tail(o), 'Pruébalo: pregunta el precio en la encuesta de Valida o dime «¿y si cobro ' + b.band.mid + '?».'), qr: ['¿Y si cobro ' + b.band.mid + '?', Q.cost, Q.comp], id: 'smart-priceview' };
+  const verdict = hi ? '**Estás por encima de la mayoría.** No es un error, pero necesitas motivos visibles.' : lo ? '**Estás en la parte baja.** Atraes por precio, pero cuesta cubrir costes y puedes parecer de poca calidad.' : '**Estás donde compra la mayoría.** El precio no es tu problema; diferénciate por servicio o especialización.';
+  return { t: J('## Tu precio frente al mercado', B(['Partes de **' + b.priceTxt + '** (' + lc(b.priceLabel) + ').', 'El mercado cobra de **' + b.band.lo + '** a **' + b.band.hi + '** (típico ≈ ' + b.band.mid + ').', '**' + b.tier.l + '.**']), verdict, secLine('precios'), 'Consejo para ' + E.lab + ': ' + lc(k.price[0]), refL(E, 'price'), tail(o), 'Pruébalo: pregunta el precio en la encuesta de Valida o dime «¿y si cobro ' + b.band.mid + '?».'), qr: ['¿Y si cobro ' + b.band.mid + '?', Q.cost, Q.comp], id: 'smart-priceview' };
 }
 function sRivalPrice(X, E, pr) { // «mi competencia cobra 25»
   const o = estFor(0), k = kb(E);
@@ -10725,7 +13820,7 @@ function sImprove(X, E) { // «¿cómo mejoro la nota?»
 function sWorth(X, E) { // «¿merece la pena seguir con mi idea?»
   const P = proj(E); if (!P.has) return noIdea(E, 'Para valorar si **merece la pena** necesito saber qué quieres vender y a quién.', 'No decido por ti: te enseño cifras y riesgos para que decidas tú.');
   const D = P.D, s = (D.strengths || [])[0], r = (D.risks || [])[0], c = nextCheck();
-  return { t: J('## ¿Merece la pena seguir?', (pn(P, E) ? '**' + pn(P, E) + '**' : 'Tu idea') + ' saca **' + D.viab + '/100**: ' + lc(D.band.l) + '.', B([s ? '**A favor:** ' + s.t : '', r ? '**En contra:** ' + r.title : '', '**Siguiente paso:** ' + (c ? c.label + ' (en ' + MODS[c.m] + ')' : 'conseguir 30 respuestas en Valida antes de invertir')].filter(Boolean)), 'La decisión de seguir es tuya: yo te señalo los datos. Lo prudente es **validar con clientes reales** antes de gastar dinero.', P.quick ? QUICK : ''), qr: [Q.explain, Q.risks, Q.val], id: 'smart-worth' };
+  return { t: J('## ¿Merece la pena seguir?', (pn(P, E) ? '**' + pn(P, E) + '**' : 'Tu idea') + ' saca **' + D.viab + '/100**: ' + lc(D.band.l) + '.', B([s ? '**A favor:** ' + s.t : '', r ? '**En contra:** ' + r.title : '', '**Siguiente paso:** ' + (c ? c.label + ' (en ' + MODS[c.m] + ')' : 'conseguir 30 respuestas en Valida antes de invertir')].filter(Boolean)), 'Decides tú; yo te enseño los datos. Lo prudente: **validar con clientes reales** antes de gastar.', P.quick ? QUICK : ''), qr: [Q.explain, Q.risks, Q.val], id: 'smart-worth' };
 }
 function sTime(X, E) {
   const P = proj(E), D = P.D;
@@ -10749,7 +13844,7 @@ function sValida(X, E) {
   const conv = m.conv || 0, base = conv > 0 ? conv : cthr, need = Math.ceil(thr / Math.max(base, 0.01));
   const nowTxt = vis || reg || enc ? 'Ahora llevas **' + vis + ' visitas**, **' + reg + ' registros** (' + cv.show + ') y **' + enc + ' encuestas**.' : 'Aún no has anotado visitas ni respuestas.';
   if (/(responde|contest|respuesta|encuesta|rellen)/.test(X.n) && /(nadie|nada|pocas?|no me|como consigo|consigo|conseguir|mas)/.test(X.n)) return { t: J('## Cómo conseguir más respuestas', nowTxt, 'Necesitas **' + thr + ' encuestas** para fiarte del veredicto' + (enc < thr ? ' (te faltan **' + (thr - enc) + '**).' : '.'), B(['**Escribe a personas concretas**, una a una: un mensaje personal contesta 5 veces más que un enlace suelto.', 'Que dure **menos de 2 minutos** y tenga máximo 5 preguntas.', 'Cuenta **para qué la usas** y ofrece algo útil a cambio (el resultado, un avance, una prioridad).', 'Insiste a las **48 horas** con un recordatorio amable.', 'Compártela donde ya está tu público: grupos, comunidades, clientes de un conocido.']), 'No compres respuestas ni pidas "me gusta": solo cuentan las de personas de tu público.'), qr: [Q.enc, Q.n, Q.crit], id: 'smart-valida' };
-  return { t: J('## Cuántas visitas necesitas', nowTxt, B(['La app pide **' + thr + ' encuestas** para fiarse del veredicto y una conversión mínima orientativa del **' + (Math.round(cthr * 1000) / 10) + ' %**.', 'A ' + (conv > 0 ? 'tu conversión actual (' + cv.show + ')' : 'esa conversión mínima') + ', para reunir ' + thr + ' registros necesitarías unas **' + need + ' visitas**.']), 'Con muy pocas visitas el dato **no sirve** para decidir: sigue compartiendo el enlace antes de sacar conclusiones.'), qr: [Q.n, Q.crit, Q.demo], id: 'smart-valida' };
+  return { t: J('## Cuántas visitas necesitas', nowTxt, B(['La app pide **' + thr + ' encuestas** para fiarse del veredicto y una conversión mínima orientativa del **' + (Math.round(cthr * 1000) / 10) + ' %**.', 'A ' + (conv > 0 ? 'tu conversión actual (' + cv.show + ')' : 'esa conversión mínima') + ', para reunir ' + thr + ' registros necesitarías unas **' + need + ' visitas**.']), 'Con muy pocas visitas el dato **no sirve** para decidir: sigue compartiendo el enlace antes de sacar conclusiones.'), qr: [Q.n, Q.crit, Q.res], id: 'smart-valida' };
 }
 function sGen(X, E) { // pestaña Genera: color, foto, botón, publicar, conversión
   const k = kb(E), n = X.n, P = proj(E);
@@ -10818,7 +13913,7 @@ function smartFirst(X, E) {
   if (/(cuanto|que precio).{0,18}(cobrar|cobro|pongo|poner|deberia|ponerle)|precio.{0,20}(bueno|correcto|adecuado|competitivo)/.test(n) && !pr) { const R = sPriceView(X, E); if (R) return R; }
   if (/(precio|tarifa|cobro|cobrar).{0,25}(alto|caro|elevado|bajo|barato|justo|normal|razonable|adecuado)|(demasiado|muy|tan) (alto|caro|barato|bajo)|soy (muy )?(caro|barato)|(es|esta) (mucho|poco)\b/.test(n)) { const R = sPriceView(X, E); if (R) return R; }
   if (/(recuper|amortiz|retorno|\broi\b|rentabiliz).{0,30}(inversion|dinero|gasto|lo que)?|cuando (gano|empiezo a ganar|salgo de perdidas)|cuanto (tardo|tardare|tardaria|tarda).{0,25}(ganar|recuper|rentab|beneficio)/.test(n)) return sPayback(X, E);
-  if (/(merece la pena|vale la pena|es viable|tiene futuro|va a funcionar|funcionara|debo seguir|sigo adelante|me lanzo|es buena idea|es rentable|sera rentable)/.test(n) && E.v !== 'modelo') return sWorth(X, E);
+  if (/(merece la pena|vale la pena|es viable|tiene futuro|va a funcionar|funcionara|debo seguir|sigo adelante|me lanzo|es buena idea|es rentable|sera rentable)/.test(n) && E.v !== 'modelo' && !/(metricas|kpis?|indicadores|medir|vigilar|numeros que)/.test(n)) return sWorth(X, E);
   if (/(mejorar|subir|aumentar|elevar|incrementar|levantar).{0,25}(nota|viabilidad|puntuacion|puntos|score|resultado)|por que.{0,25}(nota|viabilidad|puntuacion).{0,15}(baja|mala|poca)/.test(n)) return sImprove(X, E);
   if (/(riesgo|miedo|peligro|problema|preocupa|amenaza).{0,30}(marca nueva|nadie me conoce|sin resenas|sin experiencia|competencia|grande|confianza|dinero|clientes)|marca nueva|no me conoce nadie|sin resenas/.test(n)) return sRisk(X, E);
   if (/(que|cual).{0,18}(canal|red social|plataforma).{0,25}(conviene|mejor|uso|elijo|empiezo|recomiendas)|donde (anuncio|publico|promociono|capto|busco clientes)|(instagram|tiktok|linkedin|facebook|google ads|anuncios|publicidad|seo|newsletter|email)/.test(n) && E.v !== 'genera' && !/(landing|pagina web)/.test(n)) return sChan(X, E);
@@ -10838,19 +13933,33 @@ function smartFirst(X, E) {
   return null;
 }
 /** Último recurso antes de «no entiendo»: se reconoce de qué habla la persona y se ofrece lo más útil según dónde esté y qué lleve hecho. */
+/** Un principio por tema de negocio (sin cifras) para cuando Astro no tiene datos: las mismas ideas que las guías de razonamiento del servidor. */
+const TOPIC_TIP = {
+  precio: 'ancla el precio en el valor que das (lo que ahorras o resuelves), compáralo con lo que ya paga tu cliente y pruébalo con personas reales antes de fijarlo.',
+  competencia: 'elige una diferencia que tu cliente note en segundos y que a un rival grande le cueste copiar; no compitas por precio con quien tiene más escala.',
+  validacion: 'busca compromiso, no opiniones: un pago, una reserva o un contacto valen más que un «me gusta». Decide antes qué resultado contaría como éxito.',
+  finanzas: 'haz la cuenta de un solo cliente: lo que entra, lo que cuesta servirlo y captarlo, y en cuánto tiempo recuperas lo invertido.',
+  captacion: 'empieza por un solo canal, el que ya usa tu cliente y cabe en tu tiempo y tu presupuesto, y mide el coste por cliente antes de ampliar.',
+  producto: 'construye lo mínimo que resuelve el problema principal; si puedes entregarlo a mano primero, mejor.',
+  decision: 'antes de comprometer tiempo o dinero, da el paso reversible que más información te dé y fija qué señal te haría seguir o parar.',
+  tramites: 'ordena los trámites de lo primero a lo último y aplaza lo que puede esperar a tener ingresos; contrástalo con una gestoría o con la fuente oficial.',
+  planificacion: 'si no llegas, recorta alcance en vez de alargar plazos: deja una sola tarea pequeña para hoy.',
+};
 function smartEcho(X, E, rk) {
   const P = proj(E), c = nextCheck();
-  const stop = /^(quiero|puedo|puedes|tengo|tiene|tienen|hacer|hago|saber|necesito|debo|deberia|algo|cosas|esto|eso|como|cual|cuales|quien|donde|cuando|porque|sobre|para)$/;
-  const words = X.tk.filter((w) => w.length > 3 && !stop.test(w)).slice(0, 3);
-  const topic = words.length ? '**' + words.join(' ') + '**' : '';
+  let tp = ''; try { tp = MEM.topicOf(MEM.fold(X.raw))[0] || ''; } catch (e) { tp = ''; }
+  const q0 = String(X.raw || '').replace(/^[¿¡\s]+|[?!.\s]+$/g, ''), q = q0.length > 70 ? q0.slice(0, 70).replace(/\s+\S*$/, '') + '…' : q0;
+  const head = tp ? 'Sobre **' + MEM.TOPICS[tp] + '** no tengo ahora un dato fiable para tu caso concreto, y no invento.'
+    : q ? 'No tengo un dato fiable sobre «' + q + '» y no voy a inventarlo.' : 'No tengo una respuesta fiable para eso y no voy a inventarla.';
   const where = E.v === 'modelo' && !E.k ? 'la elección de tu modelo' : modName(E.v) + (E.lab ? ' con el modelo **' + E.lab + '**' : '');
   const lines = [];
+  if (tp && TOPIC_TIP[tp]) lines.push('**Lo que sí te puedo decir:** ' + TOPIC_TIP[tp]);
   if (P.has) lines.push('Con tu idea' + (pn(P, E) ? ' (**' + pn(P, E) + '**)' : '') + ' puedo darte precio, rivales, riesgos o cuánto tardas en recuperar la inversión.');
   else if (ideaText()) lines.push('Tengo tu idea guardada: pídeme «**¿qué opinas de mi idea?**» y te hago un análisis con cifras.');
   else lines.push('Cuéntame tu idea en una frase y te hago un análisis con cifras: precio, rivales, riesgos y viabilidad.');
   if (c) lines.push('Tu siguiente paso pendiente es **' + c.label + '** (en ' + MODS[c.m] + ').');
   const cand = rk.filter((r) => r.s >= 1 && CH[r.i.id]).slice(0, 2).map((r) => CH[r.i.id]);
-  const t = J(topic ? 'Te sigo: preguntas por ' + topic + ', pero **no tengo datos fiables sobre eso**; mi base es tu panel y las reglas de ValidLance, y prefiero no inventar.' : 'No tengo una respuesta fiable para eso, y prefiero no inventar.', 'Lo que sí puedo hacer ahora, en ' + where + ':', B(lines), 'Prueba a preguntarme con una cifra o un dato concreto (por ejemplo «**¿y si cobro 39 €?**» o «**¿qué canal me conviene?**») y te contesto con tus números.');
+  const t = J(head + ' Mi base es tu panel y las reglas de ValidLance.', 'Lo que sí puedo hacer ahora, en ' + where + ':', B(lines), 'Prueba con una cifra o un dato concreto, por ejemplo «**¿y si cobro 39 €?**» o «**¿qué canal me conviene?**».');
   return { t: t, qr: cand.concat(defaults(E)).slice(0, 5), low: true, id: 'clarify' };
 }
 
@@ -10860,7 +13969,7 @@ function clarify(X, E, rk) {
   const cand = rk.filter((r) => r.s >= 1.2 && CH[r.i.id]).slice(0, 3).map((r) => CH[r.i.id]);
   const out = OUT.test(X.n);
   const ctx = E.v === 'modelo' ? 'la elección de tu modelo' : modName(E.v) + ' y tu modelo **' + E.lab + '**';
-  const t = out ? J('Eso se sale de lo que sé: estoy centrado en **ValidLance y en tu idea de negocio**.', 'Puedo ayudarte con ' + ctx + '.') : J(cand.length ? 'No estoy seguro de haberte entendido. **¿Te refieres a alguna de estas?**' : 'No tengo una respuesta exacta para eso: soy un asistente con reglas, no un modelo de lenguaje.', cand.length ? 'Si no, cuéntamelo con otras palabras o dime «**no sé por dónde empezar**» y lo vemos juntos.' : 'Puedo ayudarte con ' + ctx + '. Prueba con una de las sugerencias o reformula la pregunta.');
+  const t = out ? J('Eso se sale de lo mío: me centro en **ValidLance y tu idea de negocio**.', 'Puedo ayudarte con ' + ctx + '.') : J(cand.length ? 'No estoy seguro de haberte entendido. **¿Te refieres a alguna de estas?**' : 'Eso no lo tengo cubierto: soy un asistente con reglas, no un modelo de lenguaje.', cand.length ? 'Si no, cuéntamelo con otras palabras o dime «**no sé por dónde empezar**» y lo vemos juntos.' : 'Puedo ayudarte con ' + ctx + '. Prueba con una de las sugerencias o reformula la pregunta.');
   return { t: t, qr: cand.concat(cand.length >= 3 ? [] : defaults(E)).slice(0, 5), low: !out, id: 'clarify' };
 }
 const BOOST = { compite: { price: ['precios'], comp: ['competencia'], risk: ['riesgos'], plan: ['plan'] } };
@@ -10896,10 +14005,10 @@ function answerPending(X, E) {
   if (p.kind === 'draft') {
     if (/(mejorar la idea|mejorar mi idea)/.test(X.n)) { st.d.pend = null; return startFill(E); }
     if (/(empezar de nuevo|otra vez|de nuevo|desde cero)/.test(X.n) && X.wc <= 5) { st.d.pend = null; st.idea = ''; return startDiscover(E); }
-    if (isY && E.v !== 'modelo') { st.d.pend = null; run({ fn: 'useDraft' }); return { t: 'Hecho: tu borrador ya está en **Compite**. Pulsa **Analizar** para generar el informe.', qr: defaults(E) }; }
+    if (isY && E.v !== 'modelo') { st.d.pend = null; const r = applyDraft(false, true); if (r === 'ask') return { t: 'Ya tienes una idea escrita en Compite. **¿La sustituyo por este borrador?**', qr: ['Sí, sustituir', 'No, mantener la mía'] }; if (r === true && isSheet()) close(true); return { t: r === true ? 'Hecho: tu idea ya está en **Compite**. Pulsa **Analizar**.' : 'Aún no tengo tu idea. Cuéntamela en una frase.', qr: defaults(E) }; }
   }
   if (p.kind === 'replace') {
-    if (isY || /sustituir/.test(X.n)) { st.d.pend = null; applyDraft(true); return { t: 'Listo: he sustituido tu texto por el borrador. Pulsa **Analizar** cuando quieras.', qr: defaults(env()) }; }
+    if (isY || /sustituir/.test(X.n)) { st.d.pend = null; const r = applyDraft(true, true); if (r === true && isSheet()) close(true); return { t: r === true ? 'Listo: tu idea nueva ya está en Compite. Pulsa **Analizar**.' : 'Aún no tengo ese borrador. Cuéntamelo de nuevo.', qr: defaults(env()) }; }
     if (isN || /mantener/.test(X.n)) { st.d.pend = null; return { t: 'Perfecto, dejo tu texto como estaba.', qr: defaults(E) }; }
   }
   if (p.kind === 'validate') {
@@ -10908,7 +14017,7 @@ function answerPending(X, E) {
   st.d.pend = null; return null; // la persona ha cambiado de tema: se sigue con la pregunta nueva
 }
 const FLOWOK = /^(discover|nopath|fillidea|idea)$/;
-const SMALLTALK = /^(greet|thanks|bye|who|ai|chitchat|appwhat|apphow|mods|appdata|appprice|appwho|appdiff|appreset|apptheme|appmaker|appexport|here|presoff|preson)$/;
+const SMALLTALK = /^(greet|thanks|bye|who|ai|chitchat|appwhat|apphow|mods|appdata|appprice|premium|agents|community|appwho|appdiff|appreset|apptheme|appmaker|appexport|here|presoff|preson)$/;
 /** ¿El texto responde de verdad a lo que la guía está preguntando? (una cifra para el presupuesto, algo breve para el canal…) */
 function stepFits(X, step) {
   const num = /\d/.test(X.raw), q = /\?|¿/.test(X.raw);
@@ -10942,6 +14051,11 @@ function flowTurn(X, E) {
   return f === 'discover' ? discoverTurn(X, E) : f === 'fill' ? fillTurn(X, E) : null;
 }
 function answer(raw, E, opts) {
+  const R = answer0(raw, E, opts);
+  try { if (LV.coach) { LV.coach.decorate(R, E, raw); LV.coach.invite(R, E); } } catch (e) { /* el nombre y las líneas personales son un extra */ }
+  return R;
+}
+function answer0(raw, E, opts) {
   const n = NLU.norm(raw), X = { raw: raw, n: n, tk: NLU.toks(n), wc: NLU.words(raw), q: NLU.isQ(raw, n), free: !!(opts && opts.free) };
   if (st.d.pend) { const R = answerPending(X, E); if (R) return R; }
   if (st.d.flow) { const R = flowTurn(X, E); if (R) return R; }
@@ -10955,8 +14069,9 @@ function answerFree(X, E, rk0) {
     if (y0 === 'stop') return { t: 'Vale, lo dejamos aquí. Cuando quieras retomarlo, aquí estoy.', qr: defaults(E), id: 'noop' };
     if (y0 === 'skip') return { t: 'Sin problema, lo dejamos para luego.', qr: defaults(E), id: 'noop' };
   }
-  const named = n.match(/\b(valida|compite|lanza|genera|panel)\b/);
+  const named = n.match(/\b(valida|compite|lanza|genera|panel|centro de control)\b/);
   if (named && (/(que (es|hace)|para que sirve|explica|cuentame|de que va)/.test(n) || (X.wc <= 4 && /^(y |¿y |ah y )?(el |la )?(valida|compite|lanza|genera|panel)\??$/.test(n.replace(/^¿/, '')))) && !/diferencia/.test(n)) return { t: J(explainMod(named[1], E), K.MODS[named[1]] && K.MODS[named[1]].what !== undefined && named[1] !== 'valida' ? '' : ''), qr: [Q.mods, Q.apphow, Q.disc], id: 'mod' };
+  if (LV.spec && LV.spec.active()) { const SR = LV.spec.reply(X, E); if (SR) return SR; } // agente especializado (Premium): responde con la guía de su vertical
   if (X.free && !(!X.q && X.wc >= 6 && NLU.ideaScore(raw, n) >= 3.5 && !/^(y )?(si|que pasa)/.test(n))) { const S1 = smartFirst(X, E); if (S1) return S1; } // temas con cifras y datos propios del proyecto
   if (E.v === 'modelo' && !E.k) { // en la selección, una descripción libre se traduce en una sugerencia de tarjeta
     const generic = /(que cambia|puedo cambiar|cual me conviene|no se cual|mixto|hibrido|ayuda|diferencia|compar)/.test(n);
@@ -10993,12 +14108,12 @@ function followUps(R, text, E) {
 }
 
 // ---------- mensajes ----------
-function persist() { clearTimeout(persist.t); persist.t = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify({ v: 2, msgs: st.msgs.slice(-MAX), g: st.g, mute: st.mute, wel: st.wel, noAuto: st.noAuto, ps: st.ps, nopres: st.nopres, away: st.away, idea: st.idea, d: { flow: st.d.flow, step: st.d.step, slots: st.d.slots, pend: st.d.pend, last: st.d.last, miss: st.d.miss } })); } catch (e) { /* sin almacenamiento */ } }, 250); }
+function persist() { try { if (S.view === 'hub' && LV.hub) LV.hub.refresh(); } catch (e) { /* sin centro */ } clearTimeout(persist.t); persist.t = setTimeout(() => { try { localStorage.setItem(KEY, JSON.stringify({ v: 2, msgs: st.msgs.slice(-MAX), g: st.g, mute: st.mute, wel: st.wel, noAuto: st.noAuto, ps: st.ps, nopres: st.nopres, away: st.away, idea: st.idea, mem: st.mem, d: { flow: st.d.flow, step: st.d.step, slots: st.d.slots, pend: st.d.pend, last: st.d.last, miss: st.d.miss } })); } catch (e) { /* sin almacenamiento */ } }, 250); }
 function loadStore() {
   try {
     const r = JSON.parse(localStorage.getItem(KEY) || 'null');
     if (r && (r.v === 1 || r.v === 2)) {
-      st.msgs = (r.msgs || []).filter((m) => m && (m.r === 'u' || m.r === 'a' || m.r === 'd') && typeof m.t === 'string').slice(-MAX); st.g = r.g && typeof r.g === 'object' ? r.g : {}; st.mute = r.mute ? 1 : 0; st.wel = r.wel ? 1 : 0; st.noAuto = r.noAuto ? 1 : 0; st.ps = r.ps && typeof r.ps === 'object' ? r.ps : {}; st.nopres = r.nopres ? 1 : 0; st.away = r.away ? 1 : 0;
+      st.mem = MEM.clean(r.mem); st.msgs = (r.msgs || []).filter((m) => m && (m.r === 'u' || m.r === 'a' || m.r === 'd') && typeof m.t === 'string' && (m.t.trim() || (m.stats && m.stats.length))).slice(-MAX); st.g = r.g && typeof r.g === 'object' ? r.g : {}; st.mute = r.mute ? 1 : 0; st.wel = r.wel ? 1 : 0; st.noAuto = r.noAuto ? 1 : 0; st.ps = r.ps && typeof r.ps === 'object' ? r.ps : {}; st.nopres = r.nopres ? 1 : 0; st.away = r.away ? 1 : 0;
       if (r.v === 2) { st.idea = typeof r.idea === 'string' ? r.idea : ''; const d = r.d || {}; st.d = { flow: d.flow || '', step: d.step || '', slots: d.slots && typeof d.slots === 'object' ? d.slots : {}, pend: d.pend || null, last: d.last || null, miss: Array.isArray(d.miss) ? d.miss : [] }; }
     }
   } catch (e) { /* guardado dañado: se empieza de cero */ }
@@ -11018,17 +14133,30 @@ function cardHtml() {
     '<p class="cp-card-k">Presentación oficial</p><h3>' + NAME + '</h3><p class="cp-card-r">Mentor y consultor personal de ValidLance</p>' +
     '<p class="cp-card-d">Cuéntame tu idea y te diré, con cifras, qué precio, qué modelo y qué estrategia le encajan, y si es viable.</p>' +
     '<ul class="cp-card-t" aria-label="En qué te ayudo"><li>Precio</li><li>Modelo de negocio</li><li>Estrategia</li><li>Viabilidad</li></ul>' +
-    '<small class="cp-card-n">' + 'Mentor virtual simulado: reglas y datos de tu panel, sin IA externa. No es asesoramiento legal ni financiero.' + '</small></article>';
+    '<small class="cp-card-n">' + (ragOn() ? 'Mentor virtual: reglas y datos de tu panel; el chat libre usa tu servidor de IA. No es asesoramiento legal ni financiero.' : 'Mentor virtual simulado: reglas y datos de tu panel, sin IA externa. No es asesoramiento legal ni financiero.') + '</small></article>';
 }
 /** Pone en marcha los avatares animados de un mensaje (tarjeta de presentación) una vez que está en la página. */
 function wire(n) { if (!n || !n.querySelector) return; const h = n.querySelector('.ax'); if (h) { AX.mount(h, { kind: 'card' }); AX.kick(); } }
+/** «Basado en: Tu idea · Tu modelo · Glosario»: de dónde sale una respuesta generada con el servidor RAG. */
+function srcHtml(a, d) {
+  if (!(a && a.length) && !d) return '';
+  const chips = a && a.length ? '<div class="cp-src"><span>Basado en</span>' + a.slice(0, 6).map((x) => '<i>' + esc(x) + '</i>').join('') + '</div>' : '';
+  const docs = d && Array.isArray(d.docs) ? d.docs.slice(0, 6) : [], data = d && Array.isArray(d.data) ? d.data.slice(0, 6) : [];
+  if (!docs.length && !data.length) return chips;
+  const li = (x) => '<li><b>' + esc(x.t || '') + '</b>' + (x.s ? ' · ' + esc(x.s) : '') + (x.k ? ' <small>(' + esc(x.k) + ')</small>' : '') + '</li>';
+  const ld = (x) => '<li><b>' + esc(x.n || '') + '</b>' + (x.c ? ' <small>citado en la respuesta</small>' : '') + (x.s2 ? ' <small>fuente secundaria: contrástala</small>' : '') + '</li>';
+  return chips + '<details class="cp-srcd"><summary>Ver fuentes</summary>' +
+    (docs.length ? '<p>Documentos de ValidLance consultados</p><ul>' + docs.map(li).join('') + '</ul>' : '') +
+    (data.length ? '<p>Estudios y bases de datos</p><ul>' + data.map(ld).join('') + '</ul>' : '') + '</details>';
+}
 function nodeFor(m) {
   const d = document.createElement('div');
   if (m.r === 'd') { d.className = 'cp-div'; d.innerHTML = '<span>' + esc(m.t) + '</span>'; return d; }
   if (m.r === 'u') { d.className = 'cp-m u'; d.innerHTML = '<span class="sr">Tú: </span><div class="cp-b">' + esc(m.t) + '</div>'; return d; }
   if (m.card) { d.className = 'cp-m a cardm'; d.innerHTML = cardHtml(); return d; }
-  d.className = 'cp-m a' + (m.gc ? ' gc' : '');
-  d.innerHTML = '<div class="cp-wh" aria-hidden="true">' + MINI + '<b>' + NAME + '</b></div><span class="sr">' + NAME + ': </span><div class="cp-tx">' + rich(m.t) + statsHtml(m.stats) + '</div>' + actsHtml(m.acts);
+  const WH = m.who && LV.spec ? LV.spec.get(m.who) : null;
+  d.className = 'cp-m a' + (m.gc ? ' gc' : '') + (WH ? ' spec' : '');
+  d.innerHTML = '<div class="cp-wh" aria-hidden="true">' + (WH ? LV.spec.glyph(WH, 'cp-sg') : MINI) + '<b>' + (WH ? esc(WH.name) + ' · ' + esc(WH.vert) : NAME) + '</b></div><span class="sr">' + (WH ? esc(WH.name) : NAME) + ': </span><div class="cp-tx">' + rich(m.t) + statsHtml(m.stats) + '</div>' + srcHtml(m.src, m.srcd) + actsHtml(m.acts);
   return d;
 }
 function toEnd(node) {
@@ -11053,7 +14181,7 @@ function qrHtml() {
   }).join('');
   qrEl.hidden = !st.qr.length;
 }
-function setQR(a) { st.qr = (a || []).slice(0, 6); qrHtml(); qrEl.scrollLeft = 0; }
+function setQR(a) { st.qr = (a || []).filter(Boolean).slice(0, 6); qrHtml(); qrEl.scrollLeft = 0; }
 function showTyping() {
   if (st.typ) return;
   const d = document.createElement('div'); d.className = 'cp-m a cp-ty'; d.setAttribute('aria-hidden', 'true');
@@ -11063,10 +14191,13 @@ function showTyping() {
 function hideTyping() { if (st.typ) { st.typ.remove(); st.typ = null; } delete root.dataset.talk; AX.think(false); }
 function dropLast() { const m = st.msgs.pop(); const n = log.lastElementChild; if (m && n && !n.classList.contains('cp-ty')) n.remove(); return m; }
 const wait = (t) => (reduced() ? 30 : clamp(380 + String(t || '').length * 1.1, 480, 1000));
-function part(P) { push({ r: 'a', t: P.t, card: P.card ? 1 : undefined, acts: P.acts && P.acts.length ? P.acts : undefined, stats: P.stats && P.stats.length ? P.stats : undefined }); }
+function part(P) { if (!P || (!String(P.t || '').trim() && !(P.stats && P.stats.length))) return; push({ r: 'a', t: P.t, who: P.who || undefined, card: P.card ? 1 : undefined, acts: P.acts && P.acts.length ? P.acts : undefined, stats: P.stats && P.stats.length ? P.stats : undefined, src: P.src && P.src.length ? P.src : undefined, srcd: P.srcd && typeof P.srcd === 'object' ? P.srcd : undefined }); }
 /** Entrega una respuesta (una o varias partes seguidas) con el indicador de escritura entre ellas. */
 function deliver(R, E, text) {
-  const parts = (R.seq && R.seq.length ? R.seq : [R]).filter(Boolean); let i = 0, timer = 0;
+  remember(R, text);
+  const parts = (R.seq && R.seq.length ? R.seq : [R]).filter((x) => x && (String(x.t || '').trim() || (x.stats && x.stats.length)));
+  if (!parts.length) parts.push({ t: 'No he podido prepararlo ahora. Prueba otra vez o elige una sugerencia.' });
+  let i = 0, timer = 0;
   const finish = () => {
     st.flush = null; st.busy = false; hideTyping();
     st.d.last = { id: R.id || '', concept: R.concept || '' };
@@ -11074,16 +14205,77 @@ function deliver(R, E, text) {
     const Z = env(); setQR(R.qr || (st.d.flow ? [Q.exit] : followUps(R, text, Z))); paintCtx(Z); persist();
   };
   const step = () => {
-    hideTyping(); part(parts[i]); i++;
+    hideTyping(); try { part(parts[i]); } catch (e) { /* mensaje dañado: se sigue con el resto */ } i++;
     if (i < parts.length) { showTyping(); timer = setTimeout(step, wait(parts[i].t) * 0.8); } else finish();
   };
-  st.flush = () => { clearTimeout(timer); hideTyping(); while (i < parts.length) { part(parts[i]); i++; } finish(); };
+  st.flush = () => { clearTimeout(timer); hideTyping(); while (i < parts.length) { try { part(parts[i]); } catch (e) { /* mensaje dañado */ } i++; } finish(); };
   showTyping(); timer = setTimeout(step, wait(parts[0].t));
+}
+/** Anota en la memoria lo que Astro ha respondido (solo su conclusión y su «Siguiente paso»). Saludos, guías en curso y respuestas que no entendió no cuentan. */
+function remember(R, text) {
+  try {
+    if (!R || R.low || st.d.flow || st.d.pend || R.flowOn || /^(greet|chitchat|thanks|bye|noop|memory|forgetmem|who|me|name|setname)$/.test(R.id || '')) return;
+    MEM.answered(st.mem, (R.seq && R.seq.length ? R.seq : [R]).map((x) => (x && x.t) || '').join('\n'), { q: text, topic: R.tema });
+  } catch (e) { /* la memoria es un extra */ }
 }
 function history() { return st.msgs.filter((m) => m.r === 'u' || m.r === 'a').slice(-8).map((m) => ({ role: m.r === 'u' ? 'user' : 'assistant', content: m.t })); }
 function context(E) {
   const D = E.ran ? digest() : null;
   return { module: modName(E.v), subarea: E.sub ? SUBN[E.sub] : '', model: E.full || '', idea: ideaText().slice(0, 600), progress: E.pr.total, analysis: D ? { name: D.name, viability: D.viab, verdict: D.band.l, tam: D.tam, sam: D.sam, som: D.som, rivals: D.nC, ads_cost_per_client: D.ads.cacAds, risks: D.risks.slice(0, 3).map((r) => r.title) } : null };
+}
+/** La idea del proyecto con las palabras de la persona: la ficha del panel (nombre, qué ofrece, público) y su última descripción libre. */
+function ragIdea() {
+  const I = S.idea || {}, out = [], n = String(I.name || '').trim(), p = String(I.pitch || '').trim(), a = String(I.audience || '').trim();
+  if (n) out.push('Nombre: ' + n); if (p) out.push('Qué ofrece: ' + p); if (a) out.push('Público: ' + a);
+  const t = ideaText(); if (t && (!p || t.indexOf(p) < 0)) out.push('Descripción libre: ' + t);
+  return out.join('. ').slice(0, 1200);
+}
+/** Contexto que se envía al servidor RAG: solo lo que la persona ha introducido (sin datos precargados). */
+/** Referencias de mercado del sector del proyecto (y su comparación con el análisis) para el servidor de IA. */
+/** «Dato del sector: …» (cifra de referencia con fuente) para un tema, o '' si no hay. */
+function refL(E, topic) { try { const L = MI.line(E.fam, topic); return L ? '**Dato del sector:** ' + L : ''; } catch (e) { return ''; } }
+function intelSeg() { try { const I = S.idea || {}; return MI.segment([ideaText(), I.pitch, I.audience].filter(Boolean).join(' ')); } catch (e) { return ''; } }
+function intelRefs(E, D) { try { return MI.refs(D, E.fam, intelSeg()); } catch (e) { return []; } }
+/** Perfil y ruta de la persona para el servidor de IA (solo con «IA con tu proyecto» activada y solo lo que ella contó). */
+function ragProfileOk() { try { return !!(LV.rag && LV.rag.profileOk && LV.rag.profileOk()); } catch (e) { return false; } }
+function coachRag(k) { try { return LV.coach ? (k === 'p' ? LV.coach.ragProfile() : LV.coach.ragRoute()) : null; } catch (e) { return null; } }
+/** Cifras financieras de la persona para el servidor de IA: las ESTIMACIONES de su análisis (no resultados medidos), con claves fijas y números. */
+function ragCifras(D) {
+  if (!D || !D.econ) return null;
+  const e = D.econ, o = {}, r0 = (v) => Math.round(v), r1 = (v) => Math.round(v * 10) / 10, ok = (v) => typeof v === 'number' && isFinite(v) && v > 0;
+  if (D.price && D.price.txt) o.precio_texto = String(D.price.txt).slice(0, 60);
+  if (ok(e.unit)) o.margen_cliente_mes_eur = r0(e.unit);
+  if (ok(e.mg)) o.margen_pct = r0(e.mg * 100);
+  if (ok(e.cac)) o.cac_eur = r0(e.cac);
+  if (ok(e.ltv)) o.ltv_eur = r0(e.ltv);
+  if (ok(e.cac) && ok(e.ltv)) o.ltv_cac = r1(e.ltv / e.cac);
+  if (ok(e.life)) o.vida_cliente_meses = r0(e.life);
+  if (ok(e.be)) { o.clientes_equilibrio = r0(e.be); if (typeof e.reach === 'number' && e.reach >= 0) o.clientes_alcanzables = r0(e.reach); }
+  if (ok(e.runway) && e.runway < 99) o.meses_caja = r1(e.runway);
+  if (ok(D.budget)) o.presupuesto_eur = r0(D.budget);
+  return Object.keys(o).length ? o : null;
+}
+const ragMemOk = () => { try { return !!(LV.rag && LV.rag.memoryOk && LV.rag.memoryOk()); } catch (e) { return false; } };
+function ragContext(E) {
+  const D = E.ran ? digest() : null;
+  return {
+    modulo: modName(E.v), subarea: E.sub ? SUBN[E.sub] : '', modelo: E.full || '', modelo_id: E.k || '',
+    idea: ragIdea(), progreso: E.pr && E.pr.total != null ? E.pr.total : null,
+    analisis: D ? { nombre: D.name, viabilidad: D.viab, veredicto: D.band && D.band.l, mercado_total_TAM: D.tam, mercado_alcanzable_SAM: D.sam, mercado_objetivo_SOM: D.som, rivales: D.nC, coste_por_cliente_en_anuncios: D.ads && D.ads.cacAds, riesgos_principales: (D.risks || []).slice(0, 3).map((r) => r.title) } : null,
+    segmento: intelSeg(), referencias: intelRefs(E, D), cifras: ragCifras(D),
+    perfil: ragProfileOk() ? coachRag('p') : null, ruta: ragProfileOk() ? coachRag('r') : null,
+  };
+}
+const ragHistory = () => history().slice(0, -1).map((m) => ({ role: m.role, text: String(m.content || '').slice(0, 1200) }));
+/** Ids de intenciones que siempre se resuelven en local: saludos, navegación, cambios de ajustes y los cálculos exactos con las cifras de la persona. */
+const RAG_LOCAL = /^(me|memory|forgetmem|name|setname|route|today|adjust|done|quit|stuck|plan-check|plancheck|tune|radar|vs|trend|wins|fail|kpis|strategy|live|greet|chitchat|thanks|bye|who|here|tour|awayme|presoff|preson|autoopen|appreset|apptheme|appmaker|appexport|appprice|premium|agents|community|spec-menu|mchange|mpick|fillidea|idea|help|again|noop|recommend|mod|nav|ai|appdata|gate|welcome|summary|results|idea-in|improve-ask|consult-ask)$|^(smart|discover|fill)/;
+/** Respuestas locales con cifras propias que, si la pregunta es de ESTRATEGIA (compara, decide, recomienda), mejoran con el razonamiento de la IA: el servidor ya recibe esas mismas cifras en el contexto. Los cálculos exactos (objetivo, plazo de recuperación, trámites) siguen siempre en local. */
+const RAG_STRATEGIC = /^smart-(price|priceview|rival|worth|improve|risk|chan|geo|seg|valida|nosales)$/;
+function ragWanted(R, opts, wasGuided, text) {
+  if (!(opts && opts.free) || wasGuided || !st.rag || !st.rag.on()) return false; // solo el texto escrito a mano; las sugerencias van siempre en local
+  if (st.d.flow || st.d.pend || R.flowOn || (R.seq && R.seq.length > 1)) return false; // una guía en marcha (idea, datos…) sigue en local
+  if (R.id && RAG_STRATEGIC.test(R.id)) { try { return MEM.strategic(text); } catch (e) { return false; } }
+  return !(R.id && RAG_LOCAL.test(R.id));
 }
 function ask(text, opts) {
   text = String(text || '').replace(/\s+/g, ' ').trim().slice(0, 600);
@@ -11091,18 +14283,38 @@ function ask(text, opts) {
   if (st.flush) st.flush(); // si aún estaba «escribiendo», se entrega ya la respuesta anterior para que el orden sea natural
   const wasGuided = !!(st.d.flow || st.d.pend);
   st.busy = true; push({ r: 'u', t: text }); setQR([]);
+  try { MEM.learn(st.mem, text); } catch (e) { /* la memoria es un extra */ }
   const E = env(); let R;
   try { R = answer(text, E, opts); } catch (e) { R = { t: 'Algo ha fallado al preparar la respuesta. Inténtalo de nuevo o prueba con una sugerencia.' }; }
+  if (ragWanted(R, opts, wasGuided, text)) { // chat libre → servidor RAG (LlamaIndex); si falla, tarda más de 20 s o no está configurado, responden las reglas locales
+    const local = R; let done = false;
+    const use = (X) => { if (done) return; done = true; clearTimeout(to); safeDeliver(X, local, E, text); };
+    const to = setTimeout(() => use(local), st.rag.timeout || 20000); // tope duro: pase lo que pase en la red, a los 20 s contesta Astro
+    try { showTyping(); } catch (e) { /* sin indicador: no pasa nada */ }
+    Promise.resolve().then(() => st.rag.ask({ query: text, history: ragHistory(), context: ragContext(E), memoria: ragMemOk() ? MEM.pack(st.mem) : undefined, documents: LV.spec && LV.spec.active() ? LV.spec.docs() : undefined, agent: LV.spec && LV.spec.active() ? LV.spec.active().id : undefined })).then((o) => { clearTimeout(to); if (o && o.t && String(o.t).trim() && !done) use({ t: String(o.t), acts: local.acts, qr: local.qr, src: o.src, srcd: o.srcd, who: local.who, id: 'rag', tema: o.tema }); else use(local); }).catch(() => use(local)); // cualquier error (red, servidor, IA, JSON raro) → respuesta local, sin avisos
+    return;
+  }
   if (R.low && typeof st.provider === 'function') { // las reglas no han entendido: se prueba el proveedor conectado (si lo hay)
-    showTyping(); const local = R; let done = false;
-    const use = (X) => { if (done) return; done = true; deliver(X, E, text); };
+    const local = R; let done = false;
+    const use = (X) => { if (done) return; done = true; clearTimeout(to); safeDeliver(X, local, E, text); };
     const to = setTimeout(() => use(local), 12000);
-    Promise.resolve().then(() => st.provider({ text: text, history: history(), context: context(E), local: local.t })).then((o) => { clearTimeout(to); const t = typeof o === 'string' ? o : o && o.t; if (t && !done) use({ t: String(t), acts: o && o.acts, qr: o && o.qr, id: 'provider' }); else use(local); }).catch(() => { clearTimeout(to); use(local); });
+    try { showTyping(); } catch (e) { /* sin indicador */ }
+    Promise.resolve().then(() => st.provider({ text: text, history: history(), context: context(E), local: local.t })).then((o) => { clearTimeout(to); const t = typeof o === 'string' ? o : o && o.t; if (t && String(t).trim() && !done) use({ t: String(t), acts: o && o.acts, qr: o && o.qr, id: 'provider' }); else use(local); }).catch(() => { clearTimeout(to); use(local); });
     return;
   }
   deliver(R, E, text);
 }
+/** Entrega una respuesta de forma que nada pueda dejar a la persona sin contestar ni el chat bloqueado:
+    si falla la del servidor, la local; si fallara también, una frase fija. Los errores no se muestran ni se registran. */
+const SAFE_TXT = 'Ahora mismo no puedo prepararte una respuesta completa. Prueba otra vez o toca una sugerencia.';
+function safeDeliver(X, local, E, text) {
+  try { deliver(X, E, text); return; } catch (e) { /* respuesta con una forma inesperada */ }
+  if (local && X !== local) { try { deliver(local, E, text); return; } catch (e) { /* también falla la local */ } }
+  try { deliver({ t: SAFE_TXT, id: 'noop' }, E, text); } catch (e) { st.busy = false; try { hideTyping(); } catch (e2) { /* nada más que hacer */ } }
+}
 function say(text) { if (st.ready) { part({ t: String(text) }); setQR(defaults()); } }
+/** Un mensaje de un agente especializado (Premium) con sus propias sugerencias. */
+function sayAs(who, text, qr) { if (st.ready) { part({ t: String(text), who: who }); setQR(qr && qr.length ? qr : defaults()); } }
 
 // ---------- Astro presenta cada apartado: qué se analiza, qué toca hacer y un dato de TU proyecto ----------
 const presKey = (E) => E.v + '|' + (E.sub || '') + '|' + (E.k || '') + (E.ran ? '|r' : '');
@@ -11137,7 +14349,11 @@ function presData0(E) {
     case 'modelo': {
       if (E.k) return { k: 'Cambiar de modelo', t: 'Vas a cambiar de modelo', what: 'Cada modelo cambia el lenguaje, las métricas y los análisis de toda la app.', todo: 'Toca la tarjeta nueva y confirma con «Continuar». Tus datos se conservan; Compite puede pedirte repetir el análisis.', st: 'Ahora trabajas con **' + lab + '**.', short: 'Cada modelo cambia las métricas y los análisis de toda la app.' };
       const t0 = ideaText(), r0 = t0 ? detect(t0) : null;
-      return { k: 'Selección de modelo', t: 'Elige cómo vas a ganar dinero', what: 'Aquí defines el tipo de negocio: con él adapto el lenguaje, las métricas y los análisis de competencia, precios y landings.', todo: 'Toca la tarjeta que más se parezca a lo tuyo y confirma con «Continuar». ¿Dudas? Cuéntame tu idea y te oriento; la elección siempre es tuya.', st: r0 ? 'Pista por lo que me contaste: mira **' + shortOf(r0.key) + '**. Tú decides.' : '', short: 'Elige el tipo de negocio y adapto métricas y análisis a él.' };
+      return { k: 'Selección de modelo', t: 'Elige cómo vas a ganar dinero', what: 'Defines el tipo de negocio. Con él adapto métricas, competencia, precios y landings.', todo: 'Toca la tarjeta que más se parezca a lo tuyo y pulsa «Continuar». ¿Dudas? Cuéntame tu idea; tú decides.', st: r0 ? 'Pista por lo que me contaste: mira **' + shortOf(r0.key) + '**. Tú decides.' : '', short: 'Elige el tipo de negocio y adapto métricas y análisis a él.' };
+    }
+    case 'hub': {
+      const r = hubRec(), cont = r && r.src === 'estado';
+      return { k: 'Centro de control', t: cont ? 'Sigue por aquí' : '¡Bienvenido a tu Centro de control!', what: 'Has elegido **' + lab + '**. Desde aquí abres cada módulo con un toque: competencia, precio, landing, validación y trámites. Todo empieza en blanco: lo escribes tú.', todo: r ? '**' + (cont ? 'Tu siguiente paso: ' : 'Te recomiendo empezar por ') + r.title + '.** ' + r.why : 'Elige el módulo con el que quieras empezar.', go: r ? (cont ? 'Seguir con ' : 'Empezar por ') + r.sh : '', st: E.idea || E.ran ? '**' + nm + '** · ' + LV.phaseText() + ' · progreso **' + E.pr.total + ' %**.' : '', short: r ? 'Elige un módulo; te sugiero ' + (cont ? 'seguir con' : 'empezar por') + ' **' + r.title + '**.' : 'Elige un módulo para empezar.' };
     }
     case 'panel': {
       const c = nextCheck();
@@ -11146,8 +14362,8 @@ function presData0(E) {
     }
     case 'valida': {
       const k = E.p.k;
-      if (!LV.landReady()) return { k: 'Valida', t: 'Aquí medirás tu demanda real', what: 'Publicas una landing y una encuesta y miras ' + k[0].toLowerCase() + ', ' + k[1].toLowerCase() + ' y ' + k[2].toLowerCase() + ' antes de gastar dinero.', todo: 'Primero cuenta tu idea (paso 1): sin ella no hay landing ni encuesta, y no hay ejemplos de relleno.', st: stateLine(E), short: 'Primero cuenta tu idea; luego mides la demanda.' };
-      return { k: 'Valida', t: 'Mide si hay demanda real', what: 'Publicas una landing y una encuesta y miras ' + k[0].toLowerCase() + ', ' + k[1].toLowerCase() + ' y ' + k[2].toLowerCase() + ' antes de gastar dinero.', todo: 'Rellena nombre y propuesta, publica la landing, comparte el enlace y recoge las primeras respuestas.', st: stateLine(E), short: 'Mides la demanda real con una landing y una encuesta.' };
+      if (!LV.landReady()) return { k: 'Valida', t: 'Aquí medirás tu demanda real', what: 'Publicas una landing y una encuesta y mides ' + k[0].toLowerCase() + ', ' + k[1].toLowerCase() + ' y ' + k[2].toLowerCase() + ' antes de gastar.', todo: 'Primero cuenta tu idea: sin ella no hay landing ni encuesta.', st: stateLine(E), short: 'Primero cuenta tu idea; luego mides la demanda.' };
+      return { k: 'Valida', t: 'Mide si hay demanda real', what: 'Publicas una landing y una encuesta y mides ' + k[0].toLowerCase() + ', ' + k[1].toLowerCase() + ' y ' + k[2].toLowerCase() + ' antes de gastar.', todo: 'Pon nombre y propuesta, publica, comparte el enlace y recoge las primeras respuestas.', st: stateLine(E), short: 'Mides la demanda real con una landing y una encuesta.' };
     }
     case 'compite': {
       if (E.sub === 'precios') {
@@ -11157,10 +14373,10 @@ function presData0(E) {
       if (E.sub === 'competencia') return { k: 'Análisis de competencia', t: 'Quién ocupa el mercado', what: 'Tus rivales, su cuota y los huecos donde puedes diferenciarte.', todo: 'Marca como prioritarias las recomendaciones que quieras ejecutar primero.', st: D && D.nC ? 'Hay **' + D.nC + ' rivales**; el mayor, ' + D.comps[0].name + ', se lleva ≈ ' + D.F.fn(D.comps[0].share, D.comps[0].share % 1 ? 1 : 0) + ' %.' : '', short: 'Quién ocupa el mercado y dónde hay huecos.' };
       if (E.sub === 'riesgos') return { k: 'Riesgos y estrategia', t: 'Qué puede salir mal y cómo evitarlo', what: 'Cada riesgo se enlaza con una estrategia y una acción concreta.', todo: 'Empieza por el riesgo que más afecte a tu primer cliente.', st: D && D.risks.length ? 'Tu primer riesgo: **' + D.risks[0].title + '**.' : '', short: 'Cada riesgo, con su estrategia y su acción.' };
       if (E.sub === 'plan') return { k: 'Plan de acción', t: 'Tu ruta por fases', what: 'Fases y hitos con semanas orientativas para llegar a tus primeros clientes.', todo: 'Marca los hitos al completarlos para seguir tu avance.', st: D && D.plan ? 'Son **' + D.plan.ms + ' hitos** en unas **' + D.plan.weeks + ' semanas** (orientativo).' : '', short: 'Fases y hitos con semanas orientativas.' };
-      if (E.sub === 'mercado') return { k: 'Análisis de competencia', t: 'El tamaño de tu mercado', what: 'TAM, SAM y SOM: cuánto dinero hay en juego y qué parte es alcanzable para ti.', todo: 'Fíjate en el SOM: es lo que realistamente te comerías este año.', st: D ? 'Tu parte realista (SOM): ≈ **' + D.som + '**.' : '', short: 'Cuánto dinero hay en juego y qué parte es tuya.' };
+      if (E.sub === 'mercado') return { k: 'Análisis de competencia', t: 'El tamaño de tu mercado', what: 'TAM, SAM y SOM: el mercado total, el atendible y la parte que puedes captar.', todo: 'Mira el SOM: es lo que podrías captar de verdad este año.', st: D ? 'Tu parte realista (SOM): ≈ **' + D.som + '**.' : '', short: 'Cuánto dinero hay en juego y qué parte es tuya.' };
       if (E.sub === 'datos') return { k: 'Análisis de competencia', t: 'De dónde salen las cifras', what: 'Cada dato indica si es publicado, estimado o tuyo, y su fuente.', todo: 'Contrasta las estimaciones con clientes reales en Valida.', st: D ? 'De **' + (D.prov.p + D.prov.e) + ' cifras**, ' + D.prov.p + ' son publicadas y ' + D.prov.e + ' estimadas.' : '', short: 'Cada cifra indica si es publicada o estimada.' };
-      if (E.ran) return { k: 'Análisis de competencia', t: 'Tu informe está listo', what: 'Mercado (TAM, SAM, SOM), competidores, precio y público, riesgos y plan de acción de tu idea.', todo: 'Ábrelo por tarjetas o pulsa **«Explicar estos datos de forma sencilla»** y te lo cuento en lenguaje llano.', st: D ? 'Viabilidad **' + D.viab + '/100** (' + lc(D.band.l) + ') · **' + D.nC + ' rivales** · captarías ≈ **' + D.clients + ' clientes**.' : '', short: 'Tu informe de mercado, rivales, precio, riesgos y plan.' };
-      return { k: 'Análisis de competencia', t: 'Convierte tu idea en un informe', what: 'Con tu descripción calculo el mercado (TAM, SAM, SOM), tus rivales, el precio y público, los riesgos y un plan.', todo: 'Cuéntame qué vendes, a quién, cuánto cobrarías, tu presupuesto y cómo llegarás a la gente; después pulsa «Analizar».', st: st.idea ? 'Tienes un **borrador de idea**: puedo ponerlo aquí por ti.' : '', short: 'Describe tu idea y genero mercado, rivales, precio y plan.' };
+      if (E.ran) return { k: 'Análisis de competencia', t: 'Tu informe está listo', what: 'Mercado (TAM, SAM, SOM), competidores, precio y público, riesgos y plan de acción de tu idea.', todo: 'Ábrelo por tarjetas o pulsa **«Explicar estos datos de forma sencilla»** y te lo resumo.', st: D ? 'Viabilidad **' + D.viab + '/100** (' + lc(D.band.l) + ') · **' + D.nC + ' rivales** · captarías ≈ **' + D.clients + ' clientes**.' : '', short: 'Tu informe de mercado, rivales, precio, riesgos y plan.' };
+      return { k: 'Análisis de competencia', t: 'Convierte tu idea en un informe', what: 'Con tu descripción calculo mercado (TAM, SAM, SOM), rivales, precio, riesgos y un plan.', todo: 'Cuéntame qué vendes, a quién, cuánto cobrarías y con qué presupuesto. Luego pulsa «Analizar».', st: st.idea ? 'Tienes un **borrador de idea**: puedo ponerlo aquí por ti.' : '', short: 'Describe tu idea y genero mercado, rivales, precio y plan.' };
     }
     case 'lanza': {
       let s = { done: 0, total: 0 }; try { s = LV.lanzaStats(); } catch (e) { /* sin datos */ }
@@ -11188,7 +14404,7 @@ function presentInChat(E) {
 /* ---------- posición: Astro acompaña a la persona por la app ----------
    · Reposo: el botón sube poco a poco por el borde según avanzas (Panel → Valida → Compite → Lanza → Genera). Si la persona la coloca, se respeta su sitio.
    · Escenario: al presentar un apartado la figura sale de su botón, vuela hasta un punto algo más al interior y arriba, y se queda hablando. */
-const NAVI = { modelo: 0, panel: 0, valida: 1, compite: 2, lanza: 3, genera: 4 }, SUBI = { competencia: 0.4, precios: 0.8, riesgos: 0.6, plan: 0.2, mercado: 0.4, datos: 0.2 };
+const NAVI = { modelo: 0, hub: 0, panel: 0, valida: 1, compite: 2, lanza: 3, genera: 4 }, SUBI = { competencia: 0.4, precios: 0.8, riesgos: 0.6, plan: 0.2, mercado: 0.4, datos: 0.2 };
 function homeFor(E) {
   if (isSheet() || window.innerHeight < 620) return { side: 'r', y: 0 };
   return { side: 'r', y: Math.round(((NAVI[E.v] || 0) + (SUBI[E.sub] || 0)) * 34) };
@@ -11215,7 +14431,7 @@ function fabRect() {
 /** Figura de Astro a tamaño grande con bocadillo: sale volando de su botón, se forma su rostro, presenta el apartado y vuelve sola. */
 function presOn(E, force) {
   if (!st.ready || st.open || ((st.nopres || st.away) && !force) || root.classList.contains('ax-drag')) return;
-  E = E || env(); const P = presData(E), k = presKey(E), n = st.ps[k] || 0, full = !!force || n < 2;
+  E = E || env(); const P = presData(E), k = presKey(E), n = st.ps[k] || 0, rep = E.v === 'compite' && E.ran && !E.sub, full = !!force || (n < 1 && !rep);
   st.ps[k] = n + 1; persist();
   hideTease(); clearTimeout(st.pT);
   const live = !pres.hidden && pres.classList.contains('on') && !pres.classList.contains('leaving'); // la figura ya estaba en pantalla: se traslada al nuevo apartado
@@ -11225,18 +14441,21 @@ function presOn(E, force) {
   placeStage(E);
   introClear();
   presK.textContent = NAME + ' · ' + P.k; presT.textContent = P.t;
-  const tip = P.tip && (full || P.sec) ? '<p class="cp-pres-tip"><i>' + ic('star', 'sm') + 'Consejo' + (P.sec ? ' para ' + esc(P.sec) : '') + '</i>' + inl(P.tip) + '</p>' : '';
-  presC.innerHTML = '<p class="cp-pres-r"><i>Qué se analiza aquí</i><span>' + inl(full ? P.what : P.short) + '</span></p>' + (full ? '<p class="cp-pres-r"><i>Tu turno</i><span>' + inl(P.todo) + '</span></p>' : '') + tip + (P.st ? '<p class="cp-pres-s">' + inl(P.st) + '</p>' : '');
-  presA.innerHTML = '<button type="button" class="cp-pres-go" data-act="pres-more">Cuéntame más' + ic('right', 'sm') + '</button><button type="button" class="cp-pres-ok" data-act="pres-close">Entendido</button><div class="cp-pres-lk"><button type="button" class="cp-pres-away" data-act="pres-away">Apartar a Astro</button><button type="button" class="cp-pres-mute" data-act="pres-mute">No presentar más apartados</button></div>';
-  pres.classList.toggle('mini', !full);
+  // Compacta y sin tapar el análisis: informe listo → solo el titular y las cifras; primera visita → qué se analiza y qué toca; después, una línea.
+  const tip = P.tip && full && !isSheet() ? '<p class="cp-pres-tip"><i>' + ic('star', 'sm') + 'Consejo' + (P.sec ? ' para ' + esc(P.sec) : '') + '</i>' + inl(P.tip) + '</p>' : '';
+  const body = rep ? '' : full ? '<p class="cp-pres-r"><i>Qué se analiza aquí</i><span>' + inl(P.what) + '</span></p><p class="cp-pres-r"><i>Tu turno</i><span>' + inl(P.todo) + '</span></p>' : '<p class="cp-pres-r"><span>' + inl(P.short || P.what) + '</span></p>';
+  presC.innerHTML = body + tip + (P.st ? '<p class="cp-pres-s">' + inl(P.st) + '</p>' : '');
+  presA.innerHTML = (P.go ? '<button type="button" class="cp-pres-go" data-act="hub-start">' + esc(P.go) + ic('right', 'sm') + '</button><button type="button" class="cp-pres-ok" data-act="pres-more">Cuéntame más</button>' : rep ? '<button type="button" class="cp-pres-go" data-act="agent-explain">Explícamelo fácil' + ic('right', 'sm') + '</button>' : '<button type="button" class="cp-pres-go" data-act="pres-more">Cuéntame más' + ic('right', 'sm') + '</button>') + '<button type="button" class="cp-pres-ok" data-act="pres-close">Entendido</button><div class="cp-pres-lk"><button type="button" class="cp-pres-away" data-act="pres-away">Apartar a Astro</button><button type="button" class="cp-pres-mute" data-act="pres-mute">No presentar más apartados</button></div>';
+  pres.classList.toggle('compact', !full);
   pres.setAttribute('aria-label', 'Astro presenta: ' + P.k);
   pres.hidden = false; root.dataset.pres = '1'; root.dataset.hint = '1'; fab.setAttribute('aria-label', FAB_L + ': tienes una sugerencia');
   presAt = Date.now(); pres.classList.add('on');
   const h = presV.querySelector('.ax'); if (h) { AX.mount(h); AX.replay(h); }
   const said = () => { if (pres.hidden || pres.classList.contains('leaving')) return; pres.classList.add('said'); AX.speak(2600); AX.pulse(); };
   if (life && from && !reduced()) life.arrive(presV, from, said); else said();
+  setTimeout(() => { if (!pres.hidden && pres.classList.contains('on') && !pres.classList.contains('leaving') && !pres.classList.contains('said')) pres.classList.add('said'); }, 2600);
   if (life) life.touch();
-  st.pT = setTimeout(() => hidePres(), (full ? 21000 : 10000));
+  st.pT = setTimeout(() => hidePres(), (full ? 13000 : 8000));
 }
 function finishPres() {
   clearTimeout(st.pT); if (life) life.cancel(); introClear();
@@ -11274,9 +14493,9 @@ function introSteps(E) {
   const flow = [['Modelo de negocio', 'Eliges cómo vas a ganar dinero.' ], ['Análisis de competencia', 'Quién vende ya algo parecido, qué tamaño tiene el mercado y dónde queda hueco.'], ['Precios y público', 'Cuánto cobrar y a quién, con rangos reales del mercado.'], ['Generador de landings', 'Creas tu página; Valida mide la demanda y Lanza ordena los trámites.']];
   const here = gate ? 0 : -1, welcomed = !!(LV.splash && LV.splash.welcome && LV.splash.welcome.said); // si Astro ya saludó en la pantalla de inicio, aquí no repite el saludo
   return [
-    welcomed ? { k: 'Bienvenida', t: 'Encantado, soy Astro', h: P('Ya te he saludado en la pantalla de inicio. Soy tu **mentor y consultor**: estoy aquí para que compruebes tu idea de negocio **antes de gastar dinero**.') + N('Te lo enseño en menos de un minuto. Puedes **saltarme** cuando quieras.') }
-      : { k: 'Bienvenida', t: '¡Bienvenido a ValidLance!', h: P('Soy **Astro**, tu mentor y consultor. Estoy aquí para que compruebes tu idea de negocio **antes de gastar dinero**.') + N('Te lo enseño en menos de un minuto. Puedes **saltarme** cuando quieras.') },
-    { k: 'Qué es ValidLance', t: 'Una idea, y todo lo que necesita para validarse', h: P('ValidLance es un **panel para validar ideas de negocio**: tú pones la idea y la app te da el **mercado, los rivales, el precio y una landing** para comprobar si alguien la querría.') + N('Aquí **todo empieza en blanco**: no hay proyectos ni datos de ejemplo, solo lo que tú escribas. Mis cifras son **estimaciones orientativas**, con su fuente a la vista; no son asesoramiento legal ni financiero.') },
+    welcomed ? { k: 'Bienvenida', t: coachNm() ? 'Un placer, ' + coachNm() : 'Encantado, soy Astro', h: P('Ya te he saludado en la pantalla de inicio. Soy tu **mentor y consultor**: estoy aquí para que compruebes tu idea de negocio **antes de gastar dinero**.') + N(coachIntro() || 'Te lo enseño en menos de un minuto. Puedes **saltarme** cuando quieras.') }
+      : { k: 'Bienvenida', t: coachNm() ? '¡Hola, ' + coachNm() + '!' : '¡Bienvenido a ValidLance!', h: P('Soy **Astro**, tu mentor y consultor. Estoy aquí para que compruebes tu idea de negocio **antes de gastar dinero**.') + N('Te lo enseño en menos de un minuto. Puedes **saltarme** cuando quieras.') },
+    { k: 'Qué es ValidLance', t: 'Una idea, y todo lo que necesita para validarse', h: P('ValidLance es un **panel para validar ideas de negocio**: tú pones la idea y la app te da el **mercado, los rivales, el precio y una landing** para comprobar si alguien la querría.') + N('Todo **empieza en blanco**: sin datos de ejemplo, solo lo que tú escribas. Mis cifras son **estimaciones**, con su fuente a la vista. No es asesoramiento legal ni financiero.') },
     { k: 'Tu camino', t: 'Cuatro pasos, de la idea a la landing', h: '<ol class="cp-intro-flow">' + flow.map((f, i) => '<li' + (i === here ? ' class="now"' : '') + '><b>' + (i + 1) + '</b><span><strong>' + esc(f[0]) + (i === here ? '<em>Estás aquí</em>' : '') + '</strong>' + esc(f[1]) + '</span></li>').join('') + '</ol>' },
     { k: 'Cómo te acompaño', t: 'Voy contigo por toda la app', h: '<ul class="cp-intro-ul"><li>' + inl('En cada apartado **vengo a verte**: te explico qué hacer y te doy **consejos de tu sector**.') + '</li><li>' + inl('**Escríbeme tu idea** con tus palabras y la analizo: precio, competencia y estrategia a tu medida.') + '</li><li>' + inl('Si estorbo, **apártame**: me hago una estrella pequeña en el borde. Siempre me tienes en el chat.') + '</li></ul>' },
     gate ? { k: 'Tu turno', t: 'Empecemos: elige tu modelo de negocio', h: P('Toca la tarjeta que más se parezca a tu negocio y te cuento cómo funciona ese modelo. **La eliges tú**: yo solo te oriento. Después definimos **tu proyecto real**, paso a paso.') + (TIPS ? '<p class="cp-pres-tip"><i>' + ic('star', 'sm') + 'Consejo</i>' + inl(TIPS.tip('modelo', 'general')) + '</p>' : '') }
@@ -11304,7 +14523,7 @@ function sweepCards() {
 }
 function introChat(E) {
   if (st.introMsg || st.msgs.some((m) => m.id === 'welcome')) { st.introMsg = 1; return; } st.introMsg = 1;
-  push({ r: 'a', t: J('**¡Bienvenido a ValidLance! Soy Astro**, tu mentor y consultor personal.', 'Ya conoces el camino: **modelo → competencia → precios y público → landing**.', '**Cuéntame tu idea con tus palabras** (qué vendes, a quién y cuánto cobrarías) y te digo precio, competencia, estrategia y viabilidad. O toca una tarjeta y te cuento cómo funciona ese modelo.'), id: 'welcome' }, true);
+  push({ r: 'a', t: J(coachWel(false), coachIntro(), 'Ya conoces el camino: **modelo → competencia → precios y público → landing**.', '**Cuéntame tu idea** (qué vendes, a quién y cuánto cobrarías) y te digo precio, competencia, estrategia y viabilidad. O toca una tarjeta y te explico ese modelo.'), id: 'welcome' }, true);
   setQR([Q.myidea, Q.lost, Q.tour]);
 }
 /** Astro sale volando, aterriza en la pantalla y empieza la presentación. force = a petición de la persona (también si había apartado a Astro). */
@@ -11317,7 +14536,7 @@ function introStart(force) {
   if (st.away) { st.away = 0; persist(); }
   const live = !pres.hidden && pres.classList.contains('on') && !pres.classList.contains('leaving');
   let from = null; if (life) { life.cancel(); from = live ? presV.getBoundingClientRect() : fabRect(); if (life.form === 'orb') life.wake('present'); }
-  pres.classList.remove('leaving', 'said', 'mini');
+  pres.classList.remove('leaving', 'said', 'compact');
   Object.assign(intro, { on: true, i: 0, gate: E.v === 'modelo' && !E.k });
   pres.classList.add('intro'); root.dataset.intro = '1'; pres.setAttribute('aria-live', 'polite');
   placeStage(E);
@@ -11370,17 +14589,21 @@ function setStatus() { stEl.textContent = STATUS[axMode] || statusBase; if (axMo
 function paintCtx(E) {
   E = E || env();
   const fl = st.d.flow ? (st.d.flow === 'discover' ? 'Concretar idea' + (stepIndex() ? ' · ' + Math.min(stepIndex(), 5) + '/5' : '') : 'Completar idea') : '';
-  const sig = E.v + '|' + E.sub + '|' + E.full + '|' + fl;
+  const rg = st.rag && st.rag.on() ? 'r' : '', SP = LV.spec ? LV.spec.active() : null, sig = E.v + '|' + E.sub + '|' + E.full + '|' + fl + '|' + rg + '|' + (SP ? SP.id : '');
   if (sig !== ctxSig) {
     ctxSig = sig;
+    if (noteEl) noteEl.textContent = rg ? RAG_NOTE + ' No es asesoramiento legal ni financiero.' : NOTE0;
     ctxEl.innerHTML = '<span class="cp-tag">' + ic(MICON[E.v] || 'home', 'sm') + '<span><span class="sr">Módulo: </span>' + esc(modName(E.v)) + (E.sub ? ' · ' + esc(SUBN[E.sub]) : '') + '</span></span>' +
       '<span class="cp-tag">' + ic(E.k ? E.p.ic : 'bulb', 'sm') + '<span><span class="sr">Modelo: </span>' + esc(E.full || 'Sin modelo todavía') + '</span></span>' +
-      (fl ? '<span class="cp-tag flow">' + ic('bolt', 'sm') + '<span><span class="sr">Guía en curso: </span>' + esc(fl) + '</span></span>' : '');
+      (fl ? '<span class="cp-tag flow">' + ic('bolt', 'sm') + '<span><span class="sr">Guía en curso: </span>' + esc(fl) + '</span></span>' : '') +
+      (rg ? '<span class="cp-tag rag">' + ic('bolt', 'sm') + '<span>IA con tu proyecto</span></span>' : '') +
+      (SP ? '<span class="cp-tag spec">' + LV.spec.glyph(SP, 'cp-sg') + '<span><span class="sr">Agente especializado: </span>' + esc(SP.name) + ' · ' + esc(SP.vert) + '</span><button type="button" class="cp-tag-x" data-act="spec-off" aria-label="Volver a hablar con Astro">' + ic('x', 'sm') + '</button></span>' : '');
   }
   statusBase = 'Tu mentor y consultor'; setStatus();
 }
 const TEASE = {
   modelo: (E) => (E.k ? 'Cambiar de modelo lo adapta todo. **¿Te explico qué cambia?**' : '**¿Dudas con tu modelo?** Toca una tarjeta y te cuento, o dime «no sé por dónde empezar».'),
+  hub: () => 'Estás en tu **Centro de control**. **¿Te digo por qué módulo empezar?**',
   panel: (E) => (E.idea ? 'Ya trabajas con **' + E.lab + '**. **¿Te digo cuál es tu siguiente paso?**' : 'Ya trabajas con **' + E.lab + '**. **¿Te ayudo a concretar tu idea?**'),
   valida: () => 'Estás en **Valida**. **¿Te explico cómo leer tus métricas?**',
   compite: (E) => (E.ran ? 'Hay muchas cifras. **¿Te las explico de forma sencilla?**' : 'Estás en **Compite**. **¿Te ayudo con tu idea, tu precio o tu competencia?**'),
@@ -11506,15 +14729,27 @@ function close(back) {
   if (inside || back) { try { fab.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } }
   if (life) life.touch();
 }
-function clearChat() { st.msgs = []; st.g = {}; st.gs = {}; st.k = ''; st.qr = []; st.idea = ''; st.d = { flow: '', step: '', slots: {}, pend: null, last: null, miss: [] }; st.gc = {}; st.gSig = ''; clearTimeout(persist.t); try { localStorage.removeItem(KEY); } catch (e) { /* sin almacenamiento */ } if (st.wel || st.noAuto) persist(); if (st.ready) { if (st.flush) st.flush(); hideTyping(); st.busy = false; renderAll(); qrHtml(); clearHint(); ctxSig = ''; paintCtx(); } }
+function clearChat() { st.mem = MEM.empty(); st.msgs = []; st.g = {}; st.gs = {}; st.k = ''; st.qr = []; st.idea = ''; st.d = { flow: '', step: '', slots: {}, pend: null, last: null, miss: [] }; st.gc = {}; st.gSig = ''; clearTimeout(persist.t); try { localStorage.removeItem(KEY); } catch (e) { /* sin almacenamiento */ } if (st.wel || st.noAuto) persist(); if (st.ready) { if (st.flush) st.flush(); hideTyping(); st.busy = false; renderAll(); qrHtml(); clearHint(); ctxSig = ''; paintCtx(); } }
 function newChat() { clearChat(); if (st.open) { st.k = ctxKey(); greet(env()); } else onCtx(); }
-/** Pone el borrador de idea en la caja de Compite (si ya había un texto, pregunta antes de sustituirlo). */
-function applyDraft(force) {
-  if (!st.idea) return false;
+/** Con un informe ya hecho, el formulario de Compite está plegado: se abre para que se vea el texto nuevo y el botón Analizar. */
+function showIdeaBox(idea) {
+  setTimeout(() => {
+    let t = $('#inf-text');
+    if (!t && LV.ACT['in-edit']) { try { LV.ACT['in-edit'](); } catch (e) { /* sin editor */ } t = $('#inf-text'); }
+    if (!t) return;
+    if (t.value !== idea) t.value = idea;
+    try { t.focus({ preventScroll: true }); } catch (e) { /* sin foco */ }
+    try { t.scrollIntoView({ block: 'center', behavior: reduced() ? 'auto' : 'smooth' }); } catch (e) { /* sin desplazamiento */ }
+  }, 90);
+}
+/** Pone el borrador de idea en la caja de Compite (si ya había un texto, pregunta antes de sustituirlo). Devuelve true, 'ask' o false (sin borrador). */
+function applyDraft(force, quiet) {
+  const idea = String(st.idea || '').trim();
+  if (!idea) { if (!quiet) say('Aún no tengo tu idea. Cuéntamela en una frase (qué vendes y a quién) y la llevo a Compite.'); return false; }
   const cur = String((S.compite.brief && S.compite.brief.text) || '').trim();
-  if (cur && cur !== st.idea && !force) { st.d.pend = { kind: 'replace' }; say('Ya tienes una idea escrita en Compite. **¿La sustituyo por este borrador?**'); setQR(['Sí, sustituir', 'No, mantener la mía']); return 'ask'; }
-  S.compite.brief.text = st.idea; LV.save(); LV.go('compite'); LV.syncInputs();
-  setTimeout(() => { const t = $('#inf-text'); if (t) { try { t.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } } }, 60);
+  if (cur && cur !== idea && !force) { st.d.pend = { kind: 'replace' }; if (!quiet) { say('Ya tienes una idea escrita en Compite. **¿La sustituyo por este borrador?**'); setQR(['Sí, sustituir', 'No, mantener la mía']); } return 'ask'; }
+  S.compite.brief.text = idea; LV.save(); LV.go('compite'); LV.syncInputs();
+  showIdeaBox(idea);
   return true;
 }
 
@@ -11550,8 +14785,15 @@ function run(o) {
   else if (o.fn === 'model') { if (LV.model) LV.model.open(); if (isSheet()) close(false); }
   else if (o.fn === 'gateGo') { const b = $('#mdl-go'); if (b && !b.disabled) { b.click(); if (isSheet()) close(false); } else LV.toast('Elige primero una tarjeta', 'info'); }
   else if (o.fn === 'intro') { introStart(true); }
+  else if (o.fn === 'profile') { if (LV.me) LV.me.open(LV.me.done() ? 'edit' : 'first'); if (isSheet()) close(false); }
+  else if (o.fn === 'rtMark') { const inf0 = LV.rt ? LV.rt.info() : null, was = inf0 && inf0.done[o.id]; const stp = LV.rt ? LV.rt.mark(o.id, true) : null; if (stp && LV.coach) { const R2 = LV.coach.afterMark(stp, null, !!was); if (R2) { part(R2); setQR(R2.qr || defaults()); persist(); } } }
+  else if (o.fn === 'premium') { if (LV.premium) LV.premium.open(o.f || ''); if (isSheet()) close(false); }
+  else if (o.fn === 'agents') { if (LV.spec) LV.spec.openAgents(); if (isSheet()) close(false); }
+  else if (o.fn === 'spec') { if (LV.spec && !LV.spec.use(o.id) && isSheet()) close(false); }
+  else if (o.fn === 'community') { if (LV.premium && LV.premium.gate('community')) LV.go('comunidad'); if (isSheet()) close(true); }
   else if (o.fn === 'autoOff') { st.noAuto = 1; persist(); LV.toast('Listo: ya no me abriré solo al iniciar', 'check'); say('Hecho: **no me abriré solo** al iniciar. Seguiré aquí abajo, en el botón, cuando me necesites. Si cambias de opinión, escríbeme **«abrirte al iniciar»**.'); }
   else if (o.fn === 'autoOn') { st.noAuto = 0; persist(); LV.toast('Me abriré al iniciar', 'check'); say('Hecho: **me abriré solo** al empezar cada sesión, con un saludo corto.'); }
+  else if (o.fn === 'intelSrc') { const ids = String(o.ids || '').split(',').filter(Boolean); const t = MI.sourcesText(ids); if (t) say(t); }
   else if (o.fn === 'useDraft') { const r = applyDraft(false); if (r === true && isSheet()) close(true); }
   else if (o.fn === 'base') { const s = $('#mdl-base'); if (s && o.v) { s.value = o.v; s.dispatchEvent(new Event('change', { bubbles: true })); LV.toast('Base elegida: ' + shortOf(o.v), 'check'); } }
   else if (o.pick) { // señalar la tarjeta: se resalta y se acerca a la vista, pero NO se marca; elegir es cosa de la persona
@@ -11633,16 +14875,441 @@ function ready() {
   // primera vez: siempre se despliega; después, solo si la persona no lo ha desactivado y la pantalla es ancha (en móvil la hoja taparía la app)
   const first = !st.wel, auto = !first && !st.noAuto && !isSheet();
   if (!reduced()) { root.dataset.arrive = '1'; setTimeout(() => { delete root.dataset.arrive; }, 1600); } // el avatar entra con un destello al terminar el splash
-  if (first) { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); setTimeout(() => introStart(false), reduced() ? 200 : 900); } // primera visita: Astro vuela a la pantalla, da la bienvenida y presenta ValidLance
+  if (first) { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); const go = () => setTimeout(() => introStart(false), reduced() ? 200 : 900); if (LV.me && LV.me.active()) LV.me.after(go); else go(); } // primera visita: Astro vuela a la pantalla, da la bienvenida y presenta ValidLance
   else if (auto) { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); setTimeout(autoOpen, reduced() ? 200 : 750); }
   else { st.k = ctxKey(); st.pk = presKey(env()); paintCtx(); setTimeout(() => presOn(env()), reduced() ? 150 : 1150); } // sin despliegue automático: Astro entra y presenta el apartado actual
+}
+/** La persona termina (o se salta) la bienvenida de Astro: how = first · edit · skip. */
+function onboarded(how) {
+  if (!st.ready) return;
+  if (how === 'edit') {
+    const i = LV.rt ? LV.rt.info() : null, n = coachNm();
+    const t = J('**Perfil actualizado' + (n ? ', ' + n : '') + '.** He reajustado tu ruta' + (i ? ': ahora son **≈ ' + i.R.nWeeks + ' semanas** con ' + (LV.coach ? LV.coach.line() : 'tu perfil') + '.' : '.'), i && !i.finished ? '**Siguiente paso:** ' + i.next[0].t + '.' : '');
+    push({ r: 'a', t: t, id: 'onboarded' }, true); persist();
+  }
+  try { if (LV.rt) LV.rt.paint(true); if (S.view === 'hub' && LV.hub) LV.hub.refresh(); } catch (e) { /* sin centro */ }
 }
 function boot() { const sp = $('#splash'); if (!sp || sp.hidden || (LV.splash && LV.splash.state === 'done')) ready(); }
 
 const reset0 = LV.reset;
-LV.reset = function () { const r = reset0.apply(this, arguments); lastCard = ''; st.wel = 0; st.introMsg = 0; introClear(); st.noAuto = 0; st.ps = {}; st.gs = {}; st.nopres = 0; st.away = 0; if (life && life.form === 'orb') life.wake('reset'); clearChat(); return r; };
+LV.reset = function () { const r = reset0.apply(this, arguments); lastCard = ''; try { if (LV.coach) LV.coach.resetCadence(); } catch (e) { /* sin coach */ } st.wel = 0; st.introMsg = 0; introClear(); st.noAuto = 0; st.ps = {}; st.gs = {}; st.nopres = 0; st.away = 0; if (life && life.form === 'orb') life.wake('reset'); clearChat(); return r; };
 
-LV.agent = { name: NAME, life: life, away: function () { LV.ACT['agent-away'](); }, wake: function () { if (life) life.wake('api'); }, hidePresenter: function () { hidePres(true); }, present: function (force) { presOn(env(), force !== false); }, intro: function (force) { introStart(force !== false); }, introState: function () { return { on: intro.on, i: intro.i, n: intro.n }; }, open, close, toggle: () => (st.open ? close(true) : open()), ask, say, reset: newChat, ctx: () => ctxKey(), ready, boot, explain: explainNow, setProvider: function (fn) { st.provider = typeof fn === 'function' ? fn : null; }, debug: function () { return { last: st.d.last, flow: st.d.flow, step: st.d.step, pend: st.d.pend, slots: st.d.slots, busy: st.busy, n: st.msgs.length }; }, on: true };
+LV.agent = { name: NAME, life: life, ideaText: ideaText, memory: function () { return MEM.pack(st.mem); }, away: function () { LV.ACT['agent-away'](); }, wake: function () { if (life) life.wake('api'); }, hidePresenter: function () { hidePres(true); }, present: function (force) { presOn(env(), force !== false); }, intro: function (force) { introStart(force !== false); }, introState: function () { return { on: intro.on, i: intro.i, n: intro.n }; }, open, close, toggle: () => (st.open ? close(true) : open()), ask, say, sayAs, refreshCtx: function () { ctxSig = ''; if (st.ready) paintCtx(); }, reset: newChat, ctx: () => ctxKey(), ready, boot, explain: explainNow, talk: function (q) { if (!st.ready) return; if (!st.open) open({ quiet: true }); ask(q); }, onboarded: onboarded, setProvider: function (fn) { st.provider = typeof fn === 'function' ? fn : null; }, setRag: function (o) { st.rag = o && typeof o.ask === 'function' && typeof o.on === 'function' ? o : null; ctxSig = ''; if (st.ready) paintCtx(); }, debug: function () { return { last: st.d.last, flow: st.d.flow, step: st.d.step, pend: st.d.pend, slots: st.d.slots, busy: st.busy, n: st.msgs.length }; }, on: true };
+})();
+
+/* ValidLance · Conexión de Astro con el backend RAG (LlamaIndex).
+   · Apagado por defecto: sin servidor configurado ni consentimiento, la app NO hace ninguna petición de red.
+   · La clave del modelo de IA vive solo en el servidor (.env). Aquí nunca se pide ni se guarda ninguna clave.
+   · Solo el texto escrito a mano en el chat libre de Astro viaja al servidor; las sugerencias, los botones y la navegación son siempre locales.
+   · Si el servidor falla, tarda o no tiene IA configurada, Astro responde con sus reglas locales (la persona no pierde nada). */
+(function () {
+  'use strict';
+  const LV = window.LV;
+  if (!LV || !LV.agent || !LV.agent.on || typeof LV.agent.setRag !== 'function') return; // versiones sin chat de Astro
+  const $ = LV.$;
+  const KEY = 'lv_rag_v1', TIMEOUT = 20000, NOTES_MAX = 6000, APP_V = '1.4.0'; // TIMEOUT: tope TOTAL de una pregunta (reintento incluido); después responde Astro en local
+  const LOOP = /^(localhost|127\.0\.0\.1|\[::1\])$/;
+
+  // ---------- dirección del servidor ----------
+  /** Solo https, o http en el propio equipo (localhost). Sin usuario/clave, sin parámetros ni #. Devuelve '' si no vale. */
+  function cleanUrl(u) {
+    u = String(u || '').trim();
+    if (!u) return '';
+    let x; try { x = new URL(u); } catch (e) { return ''; }
+    if (x.username || x.password || x.search || x.hash) return '';
+    const loop = LOOP.test(x.hostname);
+    if (x.protocol !== 'https:' && !(x.protocol === 'http:' && loop)) return '';
+    if (/TU-SERVIDOR|EXAMPLE\./i.test(x.hostname)) return '';
+    return x.origin + x.pathname.replace(/\/+$/, '');
+  }
+  function newPid() {
+    try { const a = new Uint8Array(12); crypto.getRandomValues(a); return Array.prototype.map.call(a, (b) => ('0' + b.toString(16)).slice(-2)).join(''); }
+    catch (e) { return (Date.now().toString(16) + Math.random().toString(16).slice(2) + '000000000000').replace('.', '').slice(0, 24); }
+  }
+  function norm(o) {
+    o = o || {};
+    return { on: !!o.on, url: cleanUrl(o.url), consent: !!o.consent, cv: o.cv === 3 ? 3 : o.cv === 2 ? 2 : 0, pid: /^[a-f0-9]{16,40}$/.test(o.pid || '') ? o.pid : newPid(), notes: String(o.notes || '').slice(0, NOTES_MAX) };
+  }
+  let cfg = (function () { try { return norm(JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { return norm({}); } })();
+  function save() { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) { /* sin almacenamiento: queda en memoria */ } }
+  const active = () => !!(cfg.on && cfg.consent && cfg.url);
+  const last = { ok: null, msg: '', at: 0 };
+
+  // ---------- red ----------
+  /** Una petición con límite de tiempo. Los errores llevan `kind`: timeout | cancel | net | http (con `status`). */
+  async function req(method, path, body, ms, ext) {
+    const ac = new AbortController(); let why0 = '';
+    const to = setTimeout(() => { why0 = 'timeout'; ac.abort(); }, ms || TIMEOUT);
+    const link = ext && ext.signal; const onAbort = () => { why0 = why0 || 'cancel'; ac.abort(); };
+    if (link) { if (link.aborted) onAbort(); else link.addEventListener('abort', onAbort, { once: true }); }
+    try {
+      const h = body ? { 'Content-Type': 'application/json' } : {}, au = authHeader(); if (au) h.Authorization = au;
+      const r = await fetch(cfg.url + path, { method: method, headers: h, body: body ? JSON.stringify(body) : undefined, signal: ac.signal, mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
+      if (!r.ok) { const e = new Error('http ' + r.status); e.kind = 'http'; e.status = r.status; throw e; }
+      return await r.json();
+    } catch (e) {
+      if (e && e.kind) throw e;
+      const er = new Error(why0 || 'net'); er.kind = why0 || 'net'; er.name = why0 ? 'AbortError' : (e && e.name) || 'Error'; throw er;
+    } finally { clearTimeout(to); if (link) link.removeEventListener('abort', onAbort); }
+  }
+  /** El código Premium solo viaja al servidor para el que se configuró (nunca a otra dirección). */
+  function authHeader() {
+    try { const R = LV.remote; if (R && R.authHeader && R.config().url && R.config().url === cfg.url) return R.authHeader(); } catch (e) { /* sin código */ }
+    return '';
+  }
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // ---------- resistencia: corta-circuitos, despertar el servidor, reintento y cancelación ----------
+  /** Corta-circuitos: tras `threshold` fallos seguidos deja de llamar al servidor durante `cooldown` y Astro responde en local al instante.
+      Pasado ese tiempo deja pasar UNA pregunta de prueba; si funciona, se cierra; si falla, otra pausa. */
+  function makeBreaker(o) {
+    o = o || {}; const th = o.threshold || 3, cd = o.cooldown || 60000, now = o.now || (() => Date.now());
+    let fails = 0, openedAt = 0, probing = false;
+    const api = {
+      state() { if (!openedAt) return fails ? 'degraded' : 'closed'; return now() - openedAt >= cd ? 'half' : 'open'; },
+      allow() { const st = api.state(); if (st === 'open') return false; if (st === 'half') { if (probing) return false; probing = true; } return true; },
+      ok() { fails = 0; openedAt = 0; probing = false; },
+      fail() { fails++; probing = false; if (fails >= th) openedAt = now(); },
+      release() { probing = false; },
+      retryIn() { return openedAt ? Math.max(0, cd - (now() - openedAt)) : 0; },
+      snapshot() { return { state: api.state(), fails: fails, retryIn: api.retryIn() }; },
+    };
+    return api;
+  }
+  const br = makeBreaker({ threshold: 3, cooldown: 60000 });
+  const wake = { state: 'idle', at: 0, okAt: 0 };   // idle | warming | ready | failed
+  /** Los servidores gratuitos se duermen tras ~15 min sin uso y tardan hasta 1 min en despertar: se les avisa antes de que la persona pregunte. */
+  async function warmUp(force) {
+    if (!active() || wake.state === 'warming') return wake.state === 'ready';
+    if (!force && wake.state === 'ready' && Date.now() - wake.okAt < 9 * 60000) return true;
+    wake.state = 'warming'; wake.at = Date.now();
+    try { const j = await req('GET', '/health', null, 60000); const ok = !!(j && j.status === 'ok'); wake.state = ok ? 'ready' : 'failed'; if (ok) wake.okAt = Date.now(); return ok; }
+    catch (e) { wake.state = 'failed'; return false; }
+  }
+  let inflight = null;
+  function cancel() { if (inflight) { try { inflight.abort(); } catch (e) { /* ya terminó */ } inflight = null; } }
+  const retriable = (e) => e && (e.kind === 'net' || (e.kind === 'http' && (e.status === 502 || e.status === 503 || e.status === 504)));
+  const countsAsOutage = (e) => e && (e.kind === 'timeout' || e.kind === 'net' || (e.kind === 'http' && e.status >= 500));
+  function why(e) {
+    if (e && (e.kind === 'timeout' || e.name === 'AbortError')) return 'El servidor tardó demasiado: si es gratuito, puede estar despertando. Espera 1 minuto y vuelve a probar.';
+    if (e && e.status === 429) return 'Demasiadas preguntas seguidas: espera unos segundos.';
+    if (e && e.status === 401) return 'El servidor no reconoce tu código de acceso Premium.';
+    if (e && e.status === 422) return 'El servidor no aceptó la pregunta.';
+    if (e && e.status) return 'El servidor respondió con un error (' + e.status + ').';
+    return 'No se pudo conectar con el servidor.';
+  }
+  const SHORT = { 'Guía de ValidLance: qué es y cómo se usa': 'Guía de ValidLance', 'Cómo validar una idea de negocio sin gastar dinero': 'Cómo validar', 'Glosario en lenguaje llano': 'Glosario', 'Ideas de partida para quien no sabe por dónde empezar': 'Ideas de partida', 'Trámites de arranque en España (orientativo)': 'Trámites', 'Fuentes consultadas por ValidLance': 'Fuentes', 'Mercado: referencias generales y venta B2B': 'Mercado y B2B' };
+  const USED = { idea: 'Tu idea', modelo: 'Tu modelo', 'análisis': 'Tu análisis', referencias: 'Datos de tu sector', notas: 'Tus notas', memoria: 'Lo que hemos hablado', cifras: 'Tus cifras' };
+  const shortTitle = (t) => SHORT[t] || String(t || '').replace(/^Modelo de negocio:\s*/, 'Modelo ').replace(/^Mercado del modelo:\s*/, 'Mercado · ').slice(0, 40);
+  /** Etiquetas cortas «Basado en…»: lo del proyecto que se usó, 2 documentos y los estudios que la respuesta cita. */
+  function srcList(j) {
+    const out = [];
+    (Array.isArray(j.used_context) ? j.used_context : []).forEach((u) => { if (USED[u] && out.indexOf(USED[u]) < 0) out.push(USED[u]); });
+    let kb = 0;
+    (Array.isArray(j.sources) ? j.sources : []).forEach((s) => {
+      if (!s || s.kind !== 'conocimiento' || kb >= 2) return;
+      const t = shortTitle(s.title);
+      if (t && out.indexOf(t) < 0) { out.push(t); kb++; }
+    });
+    (Array.isArray(j.datasets) ? j.datasets : []).forEach((d) => { if (d && d.cited && typeof d.name === 'string' && out.indexOf(d.name) < 0) out.push(String(d.name).slice(0, 40)); });
+    return out.slice(0, 6);
+  }
+  /** Detalle para «Ver fuentes»: cada documento con sus apartados y su tipo, y cada estudio o base de datos (citado o no). Solo texto corto: se escapa al pintarlo. */
+  function srcDetail(j) {
+    const docs = (Array.isArray(j.sources) ? j.sources : []).filter((s) => s && typeof s.title === 'string').slice(0, 6)
+      .map((s) => ({ t: shortTitle(s.title), s: String(s.section || '').slice(0, 120), k: String(s.doc_type || (s.kind === 'proyecto' ? 'nota de la persona' : '')).slice(0, 40) }));
+    const data = (Array.isArray(j.datasets) ? j.datasets : []).filter((d) => d && typeof d.name === 'string').slice(0, 6)
+      .map((d) => ({ n: String(d.name).slice(0, 60), c: !!d.cited, s2: !!d.secondary }));
+    return docs.length || data.length ? { docs: docs, data: data } : null;
+  }
+  const newRid = () => { try { const a = new Uint8Array(8); crypto.getRandomValues(a); return Array.from(a, (b) => (b < 16 ? '0' : '') + b.toString(16)).join(''); } catch (e) { return (Date.now().toString(16) + Math.random().toString(16).slice(2)).replace('.', '').slice(0, 16); } };
+
+  /** Lo llama Astro con el texto libre de la persona. Devuelve {t, src} o null (entonces responde con sus reglas locales, sin esperar). */
+  async function ask(p) {
+    if (!active()) return null;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) { last.ok = false; last.at = Date.now(); last.msg = 'Sin conexión: Astro responde con sus reglas locales.'; return null; } // sin red no se espera nada: respuesta local al instante
+    if (!br.allow()) { last.ok = false; last.at = Date.now(); last.msg = 'El servidor no responde: Astro usa sus reglas locales y volverá a intentarlo en ' + Math.ceil(br.retryIn() / 1000) + ' s.'; return null; }
+    cancel(); const ac = new AbortController(); inflight = ac;
+    if (wake.state !== 'ready' || Date.now() - wake.okAt > 12 * 60000) warmUp(); // si estaba dormido, que vaya despertando mientras se intenta esta pregunta
+    const deadline = Date.now() + TIMEOUT;
+    const body = { query: p.query, history: p.history || [], context: p.context || {}, project_id: cfg.pid, notes: cfg.notes, meta: { client: 'web', version: APP_V, request_id: (last.rid = newRid()) }, memoria: cfg.cv === 3 && p.memoria && typeof p.memoria === 'object' ? p.memoria : undefined, documents: Array.isArray(p.documents) && p.documents.length ? p.documents.slice(0, 4) : undefined, agent: authHeader() && p.agent ? String(p.agent).slice(0, 12) : undefined };
+    try {
+      let j = null;
+      for (let attempt = 0; ; attempt++) {
+        try { j = await req('POST', '/v1/rag/chat', body, Math.max(4000, deadline - Date.now()), { signal: ac.signal }); break; }
+        catch (e) { if (attempt === 0 && retriable(e) && deadline - Date.now() > 6000 && !ac.signal.aborted) { await sleep(600); continue; } throw e; }
+      }
+      if (!j || j.mode !== 'rag' || typeof j.answer !== 'string' || !j.answer.trim()) {
+        const w = j && j.warning ? String(j.warning) : '';
+        last.ok = false; last.at = Date.now();
+        last.msg = w === 'llm_not_configured' ? 'El servidor no tiene el modelo de IA configurado (falta la clave en su .env).' : 'El servidor no pudo generar la respuesta con IA' + (w ? ' (' + w.slice(0, 40) + ')' : '') + '.';
+        br.fail(); // el servidor está, pero su IA no responde: tras varios intentos se deja de esperar
+        return null;
+      }
+      br.ok(); wake.state = 'ready'; wake.okAt = Date.now(); last.ok = true; last.msg = ''; last.at = Date.now();
+      return { t: j.answer, src: srcList(j), srcd: srcDetail(j), specialist: j.specialist || '', tema: typeof j.tema === 'string' ? j.tema.slice(0, 20) : '', rid: typeof j.request_id === 'string' ? j.request_id.slice(0, 64) : '' };
+    } catch (e) {
+      last.ok = false; last.at = Date.now();
+      if (e && e.kind === 'cancel') { br.release(); last.msg = ''; return null; } // la sustituyó una pregunta más nueva: no cuenta como fallo
+      if (countsAsOutage(e)) br.fail(); else br.release();
+      last.msg = why(e); return null;
+    } finally { if (inflight === ac) inflight = null; }
+  }
+
+  // ---------- ventana de ajustes ----------
+  const modal = $('#m-rag');
+  if (!modal) return;
+  const elUrl = $('#rag-url'), elNotes = $('#rag-notes'), elConsent = $('#rag-consent'), elSt = $('#rag-status'), elHelp = $('#rag-help'), elN = $('#rag-notes-n');
+  function say(msg, kind) { elSt.textContent = msg || ''; elSt.className = 'help rag-status' + (kind ? ' ' + kind : ''); }
+  function paintMenu() { const s = $('#menu-rag-s'); if (s) s.textContent = active() ? 'Activa' : ''; }
+  function urlProblem(raw) {
+    const u = cleanUrl(raw);
+    if (!u) return 'Escribe la dirección completa de tu servidor, por ejemplo http://localhost:8787 (en una web https debe ser https://).';
+    if (location.protocol === 'https:' && u.indexOf('http:') === 0) return 'Esta página usa https, así que el navegador solo permite un servidor https (o la versión standalone abierta en tu equipo).';
+    return '';
+  }
+  LV.ACT['cfg-rag'] = function () {
+    const mu = $('#menu-user'); if (mu && !mu.hidden) { mu.hidden = true; const b = $('#btn-user'); if (b) b.setAttribute('aria-expanded', 'false'); }
+    elUrl.value = cfg.url; elNotes.value = cfg.notes; elConsent.checked = cfg.consent && cfg.cv === 3; elN.textContent = String(cfg.notes.length); /* quien aceptó con el texto anterior debe volver a aceptar el nuevo (incluye perfil y ruta) */
+    elHelp.textContent = 'Es el servidor de este proyecto (carpeta ValidLance_RAG_backend). En tu equipo: http://localhost:8787.';
+    say(active() ? 'Activa. Astro usa tu servidor para las preguntas que escribes en el chat.' + (cfg.cv === 3 ? '' : cfg.cv === 2 ? ' El resumen de lo que hablamos (tus cifras y decisiones) NO se envía hasta que aceptes de nuevo el texto de abajo y guardes.' : ' Tu perfil, tu ruta y lo que hablamos NO se envían hasta que aceptes de nuevo el texto de abajo y guardes.') + (last.ok === false && last.msg ? ' Último aviso: ' + last.msg : '') : 'Desactivada: la app no envía nada a ningún servidor.', active() ? 'ok' : '');
+    modal.hidden = false; setTimeout(() => { try { elUrl.focus(); } catch (e) { /* sin foco */ } }, 30);
+  };
+  LV.ACT['rag-close'] = function () { modal.hidden = true; };
+  elNotes.addEventListener('input', () => { elN.textContent = String(elNotes.value.length); });
+  LV.ACT['rag-test'] = async function () {
+    const prob = urlProblem(elUrl.value); if (prob) { say(prob, 'err'); return; }
+    const prev = cfg.url; cfg.url = cleanUrl(elUrl.value); say('Comprobando… Si tu servidor gratuito estaba dormido, puede tardar hasta 1 minuto en despertar.', '');
+    try {
+      const j = await req('GET', '/health', null, 45000);
+      const ok = j && j.status === 'ok', llm = j && j.llm;
+      if (!ok) say('El servidor está arrancando. Prueba de nuevo en unos segundos.', 'err');
+      else if (llm && !llm.configured) say('Conectado, pero el servidor no tiene modelo de IA (falta la clave en su .env). Astro seguirá con sus reglas locales.', 'warn');
+      else { br.ok(); wake.state = 'ready'; wake.okAt = Date.now(); say('Conectado ✔ · Modelo: ' + String(llm && llm.model || '—') + ' · ' + (j.knowledge ? j.knowledge.documents + ' documentos indexados' : 'base de conocimiento lista'), 'ok'); }
+    } catch (e) { say(why(e) + ' ¿Está encendido, y permite este origen en ALLOWED_ORIGINS?', 'err'); }
+    finally { cfg.url = prev; }
+  };
+  LV.ACT['rag-save'] = function () {
+    const prob = urlProblem(elUrl.value); if (prob) { say(prob, 'err'); return; }
+    if (!elConsent.checked) { say('Marca la casilla de consentimiento para activar la función.', 'err'); return; }
+    cfg.url = cleanUrl(elUrl.value); cfg.consent = true; cfg.cv = 3; cfg.on = true; cfg.notes = elNotes.value.slice(0, NOTES_MAX); save(); br.ok(); wake.state = 'idle'; warmUp(true);
+    LV.agent.setRag(api); paintMenu(); modal.hidden = true; LV.toast('Astro usará tu servidor de IA en el chat', 'check');
+  };
+  /** Desactiva, retira el consentimiento y pide al servidor que olvide las notas (si no responde, caducan solas). */
+  function forget(keepUrl) {
+    const url = cfg.url, pid = cfg.pid;
+    cfg.on = false; cfg.consent = false; cfg.cv = 0; cfg.notes = ''; cfg.pid = newPid(); if (!keepUrl) cfg.url = ''; save();
+    if (url) { try { fetch(url + '/v1/rag/project/' + pid, { method: 'DELETE', mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer' }).catch(function () { /* caduca en el servidor */ }); } catch (e) { /* caduca en el servidor */ } }
+    try { LV.agent.setRag(api); } catch (e) { /* el chat se repinta solo en la próxima acción */ }
+    paintMenu();
+  }
+  LV.ACT['rag-off'] = function () { forget(true); modal.hidden = true; LV.toast('Desactivado. Tus notas se han borrado', 'check'); };
+  document.addEventListener('click', (e) => { if (e.target === modal) modal.hidden = true; });
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !modal.hidden) modal.hidden = true; });
+
+  // «Empezar de cero» también borra las notas y el rastro en el servidor (se conserva solo la dirección, como el enlace del prototipo)
+  const reset0 = LV.reset;
+  LV.reset = function () { const was = cfg.on || cfg.notes; const r = reset0.apply(this, arguments); if (was) forget(true); return r; };
+
+  const api = { on: active, ask: ask, timeout: TIMEOUT };
+  LV.rag = { active: active, profileOk: function () { return active() && cfg.cv >= 2; }, memoryOk: function () { return active() && cfg.cv === 3; }, config: function () { return { on: cfg.on, url: cfg.url, consent: cfg.consent, notes: cfg.notes.length }; }, last: last, cleanUrl: cleanUrl,
+    health: function () { return { breaker: br.snapshot(), wake: { state: wake.state, at: wake.at, okAt: wake.okAt }, last: { ok: last.ok, msg: last.msg, at: last.at } }; },
+    warmUp: warmUp, cancel: cancel, _makeBreaker: makeBreaker, _srcList: srcList, _srcDetail: srcDetail };
+  LV.agent.setRag(api);
+  paintMenu();
+  if (active()) setTimeout(() => warmUp(), 1200); // al abrir la app con la IA activa, el servidor se despierta en segundo plano
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && active()) warmUp(); });
+  window.addEventListener('online', () => { if (active()) warmUp(true); }); // vuelve la red: se despierta el servidor antes de la siguiente pregunta
+})();
+
+/* ============================================================
+   ValidLance · Conexión con tu servidor de cuentas y comunidad (plan Premium con código de acceso).
+   · Sin servidor ni código, la app sigue siendo 100 % local: este módulo no hace ninguna petición.
+   · Con servidor + código: el SERVIDOR decide el plan (firma y caducidad del código) y guarda la comunidad
+     (muro, perfiles, feedback, contactos). La app solo muestra lo que el servidor devuelve.
+   · El código es un acceso, no una contraseña de otra cuenta: se guarda solo en este dispositivo (lv_remote_v1)
+     y se envía únicamente al servidor que escribiste, en la cabecera Authorization.
+   · Errores de red nunca bajan el plan; solo lo baja un 401 del servidor (código caducado, revocado o falso).
+   · API: LV.remote = { connect, disconnect, config, info, request, warm, cardHtml }
+   ============================================================ */
+(function () {
+'use strict';
+const LV = window.LV;
+if (!LV || !LV.premium || !LV.community) return;
+const { $, esc, ic } = LV;
+const KEY = 'lv_remote_v1', LOOP = /^(localhost|127\.0\.0\.1|\[::1\])$/, CODE = /^vl1\.[A-Za-z0-9_-]{8,500}\.[A-Za-z0-9_-]{20,100}$/;
+const TIMEOUT = 28000, WARM = 50000;
+
+/* ---------- configuración guardada ---------- */
+function cleanUrl(u) { // solo https (o http en tu propio equipo); sin usuario, parámetros ni #
+  u = String(u || '').trim(); if (!u) return '';
+  let x; try { x = new URL(u); } catch (e) { return ''; }
+  if (x.username || x.password || x.search || x.hash) return '';
+  if (x.protocol !== 'https:' && !(x.protocol === 'http:' && LOOP.test(x.hostname))) return '';
+  if (/TU-SERVIDOR|EXAMPLE\./i.test(x.hostname)) return '';
+  return x.origin + x.pathname.replace(/\/+$/, '');
+}
+function norm(o) { o = o || {}; return { url: cleanUrl(o.url), code: CODE.test(String(o.code || '')) ? String(o.code) : '' }; }
+let cfg = (function () { try { return norm(JSON.parse(localStorage.getItem(KEY) || '{}')); } catch (e) { return norm({}); } })();
+function save() { try { localStorage.setItem(KEY, JSON.stringify(cfg)); } catch (e) { /* sin almacenamiento: queda en memoria */ } }
+const info = { tier: 'free', cycle: '', exp: 0, days: 0, configured: null, checked: 0, ok: null, msg: '' };
+const linked = () => !!(cfg.url && cfg.code);
+
+/* ---------- red ---------- */
+function detailOf(j, status) {
+  const d = j && j.detail;
+  if (typeof d === 'string') return d;
+  if (Array.isArray(d) && d.length) return d.slice(0, 2).map((x) => (x && x.campo ? x.campo + ': ' : '') + (x && x.error ? x.error : '')).join(' · ');
+  return 'El servidor respondió con un error (' + status + ').';
+}
+async function once(method, path, body, ms) {
+  const ac = new AbortController(), to = setTimeout(() => ac.abort(), ms);
+  try {
+    const h = {}; if (body !== undefined && body !== null) h['Content-Type'] = 'application/json'; if (cfg.code) h.Authorization = 'Bearer ' + cfg.code;
+    const r = await fetch(cfg.url + path, { method: method, headers: h, body: body !== undefined && body !== null ? JSON.stringify(body) : undefined, signal: ac.signal, mode: 'cors', credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer' });
+    let j = null; try { j = await r.json(); } catch (e) { j = null; }
+    if (!r.ok) { const e = new Error(detailOf(j, r.status)); e.status = r.status; e.retryAfter = Number(r.headers.get('Retry-After')) || 0; throw e; }
+    return j;
+  } catch (e) {
+    if (e && e.status) throw e;
+    const er = new Error(e && e.name === 'AbortError' ? 'El servidor tardó demasiado. Si es gratuito, puede estar despertando: espera un minuto y vuelve a probar.' : 'No se pudo conectar con el servidor. Revisa tu conexión.');
+    er.net = true; throw er;
+  } finally { clearTimeout(to); }
+}
+/** Petición al servidor. Las lecturas (GET) se reintentan una vez si el servidor estaba despertando o falló un instante. */
+async function request(method, path, body, o) {
+  if (!cfg.url) throw new Error('Conecta tu servidor en «Mi plan».');
+  const ms = (o && o.ms) || TIMEOUT, t0 = Date.now();
+  try { return await once(method, path, body, ms); }
+  catch (e) {
+    if (e && e.status === 401) { expired(e.message); throw e; }
+    const soft = e && (e.net || e.status === 502 || e.status === 503 || e.status === 504);
+    if (method === 'GET' && soft && Date.now() - t0 < ms * 0.6) { await new Promise((r) => setTimeout(r, 900)); return once(method, path, body, Math.max(8000, ms - (Date.now() - t0))); }
+    throw e;
+  }
+}
+/** Despierta el servidor (los planes gratuitos se duermen). No lanza: devuelve true si respondió. */
+async function warm() {
+  if (!cfg.url) return false;
+  try { const j = await once('GET', '/health', null, WARM); return !!(j && j.status === 'ok'); } catch (e) { return false; }
+}
+function expired(msg) { // el servidor dijo «código no válido»: se baja el plan, pero el código se conserva por si fue un fallo temporal
+  info.ok = false; info.tier = 'free'; info.msg = msg || 'Tu código ya no es válido.'; info.checked = Date.now();
+  if (LV.premium.has() && !LV.premium.isPreview()) { LV.premium.force('free', false); LV.toast('Tu código de acceso ha caducado o ya no es válido', 'alert'); }
+  paintCard();
+}
+
+/* ---------- proveedores que usa el resto de la app ---------- */
+const enc = encodeURIComponent;
+function qs(q) { const p = new URLSearchParams(); q = q || {}; ['q', 'sector', 'stage', 'model', 'cursor'].forEach((k) => { if (q[k]) p.set(k, String(q[k]).slice(0, 80)); }); if (q.same) p.set('same', '1'); const s = p.toString(); return s ? '?' + s : ''; }
+function communityProvider() {
+  const C = '/v1/community';
+  return {
+    list: (q) => request('GET', C + '/posts' + qs(q)),
+    people: (q) => request('GET', C + '/people' + qs(q)),
+    publish: (post) => request('POST', C + '/posts', post, { ms: 60000 }),
+    unpublish: (id) => request('DELETE', C + '/posts/' + enc(id)),
+    landing: (id) => request('GET', C + '/posts/' + enc(id) + '/landing').then((r) => (r && r.html) || ''),
+    feedback: { list: (id) => request('GET', C + '/posts/' + enc(id) + '/feedback'), add: (id, fb) => request('POST', C + '/posts/' + enc(id) + '/feedback', fb) },
+    profile: { get: () => request('GET', C + '/profile'), save: (p) => request('PUT', C + '/profile', p), remove: () => request('DELETE', C + '/profile') },
+    contacts: {
+      list: () => request('GET', C + '/contacts'),
+      request: (to, message) => request('POST', C + '/contacts', { to: to, message: message }),
+      respond: (id, a) => request('POST', C + '/contacts/' + enc(id) + '/respond', { action: a }),
+      cancel: (id) => request('DELETE', C + '/contacts/' + enc(id)),
+    },
+    report: (kind, id, reason) => request('POST', C + '/reports', { kind: kind, id: id, reason: reason }),
+  };
+}
+const premiumProvider = {
+  status: async () => {
+    try { const r = await request('GET', '/v1/account/status'); read(r); return { tier: r.tier === 'premium' ? 'premium' : 'free' }; }
+    catch (e) { if (e && e.status === 401) return { tier: 'free' }; return null; } // sin red: se mantiene el plan que ya había
+  },
+  portal: async () => ({ url: '' }),
+};
+function read(r) {
+  info.ok = true; info.msg = ''; info.checked = Date.now(); info.configured = !!(r && r.configured);
+  info.tier = r && r.tier === 'premium' ? 'premium' : 'free'; info.cycle = (r && r.cycle) || ''; info.exp = (r && r.expires_at) || 0; info.days = (r && r.days_left) || 0;
+}
+function attach() { LV.community.setProvider(communityProvider()); return LV.premium.setProvider(premiumProvider); }
+function detach() { LV.community.setProvider(null); LV.premium.setProvider(null); }
+
+/* ---------- conectar y desconectar ---------- */
+function problem(url, code) {
+  if (!cleanUrl(url)) return 'Escribe la dirección completa del servidor, por ejemplo https://tu-servidor.onrender.com';
+  if (location.protocol === 'https:' && cleanUrl(url).indexOf('http:') === 0) return 'Esta página usa https, así que el navegador solo permite un servidor https.';
+  if (!CODE.test(String(code || '').trim())) return 'El código no tiene el formato correcto: empieza por «vl1.» y tiene tres partes separadas por puntos. Cópialo entero.';
+  return '';
+}
+async function connect(url, code, onStep) {
+  url = cleanUrl(url); code = String(code || '').trim();
+  const pr = problem(url, code); if (pr) throw new Error(pr);
+  const prev = { url: cfg.url, code: cfg.code }; cfg = { url: url, code: code };
+  try {
+    if (onStep) onStep('Comprobando el servidor… Si estaba dormido, puede tardar hasta 1 minuto en despertar.');
+    await warm();
+    if (onStep) onStep('Comprobando tu código…');
+    const r = await once('GET', '/v1/account/status', null, 30000);
+    read(r);
+    if (!r.configured) throw new Error('Este servidor no tiene activado el plan Premium (falta ENTITLEMENT_SECRET en su configuración).');
+    if (r.tier !== 'premium') throw new Error('El servidor no reconoce ese código: puede estar mal copiado, caducado o dado de baja. Pide uno nuevo a quien administra ValidLance.');
+    save(); await attach();
+    return info;
+  } catch (e) { cfg = prev; throw e; }
+}
+function disconnect() {
+  cfg.code = ''; save(); detach(); info.tier = 'free'; info.ok = null; info.msg = ''; info.exp = 0;
+  if (LV.premium.has() && !LV.premium.isPreview()) LV.premium.force('free', false);
+  paintCard();
+}
+
+/* ---------- tarjeta «Código de acceso» dentro de la ventana de planes ---------- */
+const host = () => { try { return new URL(cfg.url).host; } catch (e) { return ''; } };
+const fmt = (t) => { try { return new Date(t).toLocaleDateString('es-ES', { day: 'numeric', month: 'long', year: 'numeric' }); } catch (e) { return ''; } };
+function cardHtml() {
+  if (linked()) {
+    const live = info.tier === 'premium' && info.ok !== false;
+    return '<section class="rem" aria-labelledby="rem-t"><h4 id="rem-t">' + ic('key', 'sm') + 'Código de acceso</h4>' +
+      '<p class="rem-row"><span class="chip ' + (live ? 'ok' : 'gold') + '">' + ic(live ? 'check' : 'alert', 'sm') + (live ? 'Premium activo' : info.ok === false ? 'Código no válido' : 'Conectado') + '</span><span class="rem-host">' + esc(host()) + '</span></p>' +
+      '<p class="help" id="rem-st" role="status" aria-live="polite">' + esc(live && info.exp ? 'Tu código vale hasta el ' + fmt(info.exp) + '.' : info.msg || 'El plan lo decide el servidor, no este dispositivo.') + '</p>' +
+      '<div class="row"><button class="btn sm" type="button" data-act="rem-check">Volver a comprobar</button><button class="btn sm ghost" type="button" data-act="rem-off">Desconectar este dispositivo</button></div></section>';
+  }
+  return '<details class="rem rem-d"' + (cfg.url ? ' open' : '') + '><summary>' + ic('key', 'sm') + '¿Tienes un código de acceso?</summary>' +
+    '<p class="help">Si quien administra ValidLance te ha dado un código, pégalo aquí con la dirección de su servidor. El servidor comprueba el código y activa Premium. Se guarda solo en este dispositivo y se envía únicamente a ese servidor.</p>' +
+    '<div class="field"><label class="lbl" for="rem-url">Dirección del servidor</label><input class="in" id="rem-url" type="url" inputmode="url" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="https://tu-servidor.onrender.com" value="' + esc(cfg.url || suggest()) + '"></div>' +
+    '<div class="field"><label class="lbl" for="rem-code">Código de acceso</label><input class="in" id="rem-code" type="password" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="vl1.…"></div>' +
+    '<p class="help rag-status" id="rem-st" role="status" aria-live="polite"></p>' +
+    '<div class="row"><button class="btn pri sm" type="button" data-act="rem-connect">' + ic('key', 'sm') + 'Activar con mi código</button></div></details>';
+}
+function suggest() { try { const u = LV.rag && LV.rag.config && LV.rag.config().url; return u || ''; } catch (e) { return ''; } }
+function say(msg, kind) { const el = $('#rem-st'); if (!el) return; el.textContent = msg || ''; el.className = 'help rag-status' + (kind ? ' ' + kind : ''); }
+function paintCard() { const m = $('#m-premium'); if (m && !m.hidden && LV.premium.repaint) LV.premium.repaint(); }
+
+LV.ACT['rem-connect'] = async function (el) {
+  const url = ($('#rem-url') || {}).value, code = ($('#rem-code') || {}).value;
+  const pr = problem(url, code); if (pr) { say(pr, 'err'); return; }
+  el.disabled = true; say('Conectando…', '');
+  try { await connect(url, code, (m) => say(m, '')); LV.toast('Premium activado con tu código', 'star'); LV.premium.proceed && LV.premium.proceed(); }
+  catch (e) { say(e.message || 'No se pudo conectar.', 'err'); }
+  finally { el.disabled = false; }
+};
+LV.ACT['rem-check'] = async function (el) {
+  el.disabled = true; say('Comprobando…', '');
+  try { await LV.premium.sync(); paintCard(); } finally { el.disabled = false; }
+};
+LV.ACT['rem-off'] = function () { disconnect(); LV.toast('Dispositivo desconectado. Vuelves al plan Gratuito', 'check'); };
+
+// «Empezar de cero» reinicia el plan guardado en este dispositivo: si hay código, el servidor lo vuelve a confirmar
+const reset0 = LV.reset;
+LV.reset = function () { const r = reset0.apply(this, arguments); if (linked()) setTimeout(() => { try { LV.premium.sync(); } catch (e) { /* sin plan */ } }, 50); return r; };
+
+LV.remote = {
+  connect: connect, disconnect: disconnect, request: request, warm: warm, cardHtml: cardHtml, problem: problem,
+  authHeader: () => (cfg.code ? 'Bearer ' + cfg.code : ''), // solo lo lee rag.js, y solo lo envía a esta misma dirección
+  info: () => JSON.parse(JSON.stringify(info)), config: () => ({ url: cfg.url, linked: linked() }),
+};
+if (linked()) { attach(); setTimeout(warm, 1500); } // al abrir la app con un código guardado, el servidor se despierta en segundo plano
 })();
 
 /* ============================================================
@@ -11651,14 +15318,16 @@ LV.agent = { name: NAME, life: life, away: function () { LV.ACT['agent-away']();
 (function () {
 'use strict';
 const S = LV.state;
-const VIEWS = ['panel', 'valida', 'compite', 'lanza', 'genera'];
+const VIEWS = ['hub', 'panel', 'valida', 'compite', 'lanza', 'genera'];
 LV.applyTheme(); LV.applyProto();
 try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', () => { LV.applyTheme(); }); } catch (e) { /* navegador antiguo */ }
 LV.restartLive();
 LV.agent.boot(); // el asistente se activa en cuanto no hay pantalla de inicio por delante
 LV.model.boot(); // sin modelo elegido, la pantalla de selección queda lista debajo de la pantalla de inicio
+LV.me.boot(); // persona nueva: la bienvenida de Astro (5 preguntas) queda lista, por encima de la selección de modelo
+if (LV.rt) { LV.rt.ensure(); LV.rt.paintMenu(); }
 let h = ''; try { h = (location.hash || '').replace('#', ''); } catch (e) { /* sin acceso */ }
-LV.go(VIEWS.indexOf(h) >= 0 ? h : (VIEWS.indexOf(S.view) >= 0 ? S.view : 'panel'));
+LV.go(VIEWS.indexOf(h) >= 0 ? h : (VIEWS.indexOf(S.view) >= 0 ? S.view : 'hub'));
 window.addEventListener('resize', () => LV.fitMini());
 if (!LV.storeOK) { // visor sin almacenamiento: se avisa una vez, cuando ya no hay pantalla de inicio ni selector por delante
   let n = 0; const iv = setInterval(() => {
@@ -11851,6 +15520,7 @@ function done(focus) {
   state = 'done'; fire('done'); clearTimeout(t1); clearTimeout(t2); cancelAnimationFrame(raf); raf = 0;
   fadeOut(); root.hidden = true;
   document.removeEventListener('keydown', onKey);
+  if (LV.me) LV.me.splashDone();
   if (LV.model) LV.model.splashDone();
   if (LV.agent) LV.agent.ready(); // el asistente aparece cuando termina la pantalla de inicio
   if (focus && !(LV.model && LV.model.gateOpen())) { const t = $('#hd-title'); if (t) { t.setAttribute('tabindex', '-1'); try { t.focus({ preventScroll: true }); } catch (e) { /* sin foco */ } } }
@@ -11900,22 +15570,21 @@ fit();
 if (!RM && ctx) raf = requestAnimationFrame(loop);
 try { btn.focus({ preventScroll: true, focusVisible: false }); } catch (e) { /* sin foco */ }
 
-LV.splash = { go: function () { const c = center(); go(c[0], c[1]); }, skip: skip, hooks: hooks, get state() { return state; } };
+LV.splash = { go: function (x, y) { const c = center(); go(x == null ? c[0] : x, y == null ? c[1] : y); }, skip: skip, hooks: hooks, get state() { return state; } };
 })();
 
 /* ============================================================
    Pantalla de inicio · bienvenida de Astro
-   Secuencia (≈ 11 s, siempre saltable con un toque, Enter o Esc):
-     1 · Astro aparece por el borde izquierdo y CRUZA la pantalla flotando (balanceo al caminar, inclinación según la velocidad,
-         estela de polvo estelar) hasta el lado derecho…
-     2 · …da la vuelta y se DETIENE en el centro, delante de la marca (que se atenúa para darle el protagonismo).
-     3 · Un bocadillo muestra EXACTAMENTE la frase de bienvenida, palabra a palabra, mientras su rostro de constelaciones «habla».
-     4 · Tras una pausa para asimilarla, Astro vuela en arco hasta su rincón flotante (abajo a la derecha, donde vivirá en el panel),
-         deja una estrella ahí y, en ese momento, el botón «Comenzar» se activa del todo con un destello.
-   Antes del final el botón se ve atenuado («en espera»), pero nunca bloquea: pulsar en cualquier parte salta la bienvenida y entra.
-   Con prefers-reduced-motion no hay cruce, estela ni vuelo: Astro aparece en el centro, dice la frase y se desvanece.
-   Marcado: #sp-stage dentro de #splash (body.html) · Estilos: splash_astro.css · Estado: #splash[data-welcome]
-   API: LV.splash.welcome → { phrase, cfg, state, said, skip() }.   cfg.autoContinue (ms): si > 0, entra solo tras activarse el botón · cfg.once: true → solo la primera vez.
+   Secuencia (≈ 8 s, siempre saltable con un toque, Enter o Esc). Astro es su BUSTO CON TRAJE (el mismo del panel: traje oscuro, camisa, corbata granate y el rostro de constelaciones): sin cuerpo entero y sin caminata (cfg.fullBody = false, por defecto).
+     1 · APARECE en el CENTRO EXACTO de la pantalla: el centro de su busto coincide con el centro de la pantalla (horizontal y vertical); se materializa entre polvo de estrellas mientras sus constelaciones se ensamblan.
+     2 · Con un leve cabeceo de saludo, un bocadillo sobre su frente muestra EXACTAMENTE la frase de bienvenida, palabra a palabra, mientras su rostro «habla».
+     3 · Tras una pausa para asimilarla, SALE: vuela en arco hacia su rincón (abajo a la derecha, donde vivirá en el panel) empequeñeciendo, deja una estrella ahí y la pantalla de inicio se disuelve
+         en una lluvia de estrellas que da paso al panel principal (cfg.autoContinue; 0 = esperar al botón «Comenzar»).
+   cfg.fullBody = true recupera la versión de cuerpo entero (cuerpo celeste de polvo de estrellas, sin traje): entra ANDANDO por el borde izquierdo en línea recta hasta el centro (la amplitud de la zancada sigue a la velocidad,
+   sin patinar; torso, brazos y rodillas se mueven) y sale andando hacia su rincón. El archivo src/astro_full_suit.svg conserva la versión con traje negro total.
+   Pulsar en cualquier parte salta la bienvenida y entra. Con prefers-reduced-motion no hay materialización, estela ni vuelo: Astro aparece quieto en el centro, dice la frase y se desvanece.
+   Marcado: #sp-stage dentro de #splash (body.html) · Estilos: splash_astro.css · Estado: #splash[data-welcome] = wait → walk (entrada) → stage → exit → ready  (off = saltada)
+   API: LV.splash.welcome → { phrase, cfg, state, said, skip() }.   cfg.autoContinue (ms; 0 por defecto = espera al botón «Comenzar»; p. ej. 650 = entra solo tras la salida) · cfg.once: true → solo la primera vez.
    ============================================================ */
 (function () {
 'use strict';
@@ -11928,7 +15597,11 @@ if (!stage || !fig || !say || !sayT || !host || !AX || !btn) return;
 
 const PHRASE = '¡Bienvenido a ValidLance, donde te ayudaremos a que tu proyecto se haga realidad!';
 const NAME = 'Astro';
-const CFG = { start: 900, cross: 2800, back: 1500, word: 135, hold: 2100, exit: 1250, autoContinue: 0, once: false }; // once: true → solo la primera vez que se abre la app
+// fullBody: false (por defecto) → Astro es su busto con traje (como en el panel): aparece en el centro exacto de la pantalla, sin cuerpo entero y sin caminata (appear = ms que tarda en materializarse);
+//           true → versión de cuerpo entero que entra andando (walkMin/walkMax) · walkMin/walkMax: duración (ms) de la entrada andando (se ajusta a la distancia) · hold: pausa con la frase ya completa · exit: salida · autoContinue: ms tras la salida para abrir el panel solo (0 = espera al botón)
+const CFG = { start: 800, walkMin: 2800, walkMax: 4800, word: 135, hold: 1900, exit: 1500, autoContinue: 0, once: false, fullBody: false, appear: 1500 }; // once: true → solo la primera vez que se abre la app
+// marcha: cycle = segundos por ciclo completo (dos pasos) · amp = grados de zancada a velocidad plena · knee = flexión máxima de la rodilla al adelantar la pierna · lift = leve subida de la cadera en el paso · arm = balanceo del brazo · bob = rebote del torso · sway = vaivén lateral (unidades del viewBox 120 × 310)
+const GAIT = { cycle: 0.8, amp: 12, knee: 17, lift: 1.4, arm: 8.5, bob: 1.5, sway: 0.5, leg: 110 };
 const KEY = 'lv_splash_welcome_v1';
 const seen = () => { try { return localStorage.getItem(KEY) === '1'; } catch (e) { return false; } };
 const mark = () => { try { localStorage.setItem(KEY, '1'); } catch (e) { /* sin almacenamiento */ } };
@@ -11944,12 +15617,34 @@ const alive = () => !dead;
 const sleep = (ms) => new Promise((res) => { const t = setTimeout(() => { timers.delete(t); res(); }, ms); timers.add(t); });
 function setState(s) { state = s; root.dataset.welcome = s; }
 
-// ---------- medidas: la figura y el bocadillo se colocan con variables CSS ----------
+// ---------- medidas: la figura (cuerpo entero) y el bocadillo se colocan con variables CSS ----------
+const FULL = !!CFG.fullBody;
+fig.classList.toggle('head', !FULL); root.classList.toggle('sp-head', !FULL);
+const RATIO = FULL ? 310 / 120 : 1; // alto / ancho de la figura (cuerpo entero: viewBox 120 × 310 · solo rostro: cuadrado 120 × 120)
+/** Altura real del bocadillo con la frase ya maquetada (las palabras ocupan su sitio aunque aún no se vean). */
+function sayHeight() { if (!sayT.firstChild) buildPhrase(); return say.offsetHeight || 150; }
 function metrics() {
   const W = root.clientWidth || innerWidth, H = root.clientHeight || innerHeight;
-  const fs = Math.round(clamp(Math.min(W * 0.5, H * 0.38), 150, 300)), fy = Math.round(H * 0.6);
-  M = { W: W, H: H, fs: fs, fy: fy };
-  stage.style.setProperty('--sp-fs', fs + 'px'); stage.style.setProperty('--sp-fy', fy + 'px');
+  const bh = sayHeight(), gap = 18, mg = Math.max(14, H * 0.03);
+  let fh, ft;
+  if (!FULL) {
+    // busto con traje: el CENTRO del busto circular (50 % de la caja) queda en el centro exacto de la pantalla y la frase justo encima de su cabeza; si no cupiera, el conjunto baja lo justo
+    fh = clamp(Math.min(H * 0.4, W * 0.62), 150, 440); ft = H / 2 - 0.5 * fh;
+    const top = ft - fh * 0.02 - bh; if (top < mg) ft += mg - top;
+  } else {
+  // Astro va en el CENTRO EXACTO de la pantalla (eje horizontal y vertical) y la frase encima de su cabeza, siempre que quepan; en pantallas bajas o estrechas el conjunto (frase + Astro) se centra en vertical
+  // y la figura entera cabe SIEMPRE bajo el bocadillo. Horizontalmente Astro va justo en el eje en ambos casos.
+  fh = clamp(H * 0.56, 190, 700);
+  fh = Math.min(fh, W * 0.5 * RATIO); ft = (H - fh) / 2; // en pantallas estrechas, nunca más ancha que la mitad
+  if (ft - bh < mg || fh < 190) {
+    fh = clamp(Math.min(H * 0.64, H - 2 * mg - bh - gap), 190, 720); fh = Math.min(fh, W * 0.5 * RATIO);
+    ft = Math.max(mg, (H - (bh + gap + fh)) / 2) + bh + gap;
+  }
+  }
+  const fw = fh / RATIO;
+  M = { W: W, H: H, fw: fw, fh: fh, ft: ft, bh: bh };
+  stage.style.setProperty('--sp-fw', fw.toFixed(1) + 'px'); stage.style.setProperty('--sp-fh', fh.toFixed(1) + 'px');
+  stage.style.setProperty('--sp-ft', ft.toFixed(1) + 'px'); stage.style.setProperty('--sp-say-y', (ft + fh * (FULL ? 0.012 : -0.02)).toFixed(1) + 'px');
   fxFit();
   return M;
 }
@@ -11991,15 +15686,17 @@ function emit(x, y, n, o) {
   fxKick();
 }
 function fxKick() { if (!FX.raf && !FX.in && FX.ctx) { FX.last = performance.now(); FX.raf = requestAnimationFrame(fxFrame); } }
-function figCenter() { const r = fig.getBoundingClientRect(), s = stage.getBoundingClientRect(); return { x: r.left - s.left + r.width / 2, y: r.top - s.top + r.height * 0.58, w: r.width }; }
+/** Punto de la figura (fracciones del ancho y del alto de su caja, con su movimiento actual) en coordenadas de la escena. w = ancho actual. */
+function figPt(kx, ky) { const r = fig.getBoundingClientRect(), s = stage.getBoundingClientRect(); return { x: r.left - s.left + r.width * kx, y: r.top - s.top + r.height * ky, w: r.width }; }
+const figCenter = () => figPt(0.5, 0.58);
 function fxFrame(now) {
   FX.raf = 0; FX.in = true; const c = FX.ctx; if (!c) { FX.in = false; return; }
   const dt = Math.min(0.05, (now - FX.last) / 1000 || 0.016); FX.last = now;
   if (FX.trail && !dead) { // estela: nace detrás de la figura, en sentido contrario al movimiento
-    const f = figCenter(), pv = FX.prev; FX.prev = f;
+    const f = figPt(0.5, FULL ? 0.92 : 0.5), pv = FX.prev; FX.prev = f;
     if (pv) {
       const vx = (f.x - pv.x) / dt, vy = (f.y - pv.y) / dt, sp = Math.hypot(vx, vy);
-      if (sp > 40) { const ang = Math.atan2(-vy, -vx); emit(f.x - (vx / sp) * f.w * 0.22, f.y + f.w * 0.04, sp < 140 ? 1 : sp < 320 ? 2 : sp < 520 ? 3 : 4, { angle: ang, spread: 1.7, speed: 40 + sp * 0.07, jit: f.w * 0.24, ttl: 1.5, size: 12, rise: 12 }); }
+      if (sp > 40) { const ang = Math.atan2(-vy, -vx); emit(f.x - (vx / sp) * f.w * 0.3, f.y, sp < 140 ? 1 : sp < 320 ? 2 : sp < 520 ? 3 : 4, { angle: ang, spread: 1.7, speed: 40 + sp * 0.07, jit: f.w * 0.3, ttl: 1.5, size: 12, rise: 12 }); }
     }
   } else FX.prev = null;
   c.setTransform(FX.dpr, 0, 0, FX.dpr, 0, 0); c.clearRect(0, 0, FX.W, FX.H); c.globalCompositeOperation = 'lighter';
@@ -12020,49 +15717,77 @@ function fxFrame(now) {
 
 // ---------- trayectorias (Web Animations: fotogramas calculados, sin dependencias) ----------
 const eio = (u) => 0.5 - 0.5 * Math.cos(Math.PI * u);           // easeInOutSine
-const eout = (u) => 1 - Math.pow(1 - u, 2.4);                    // frena al llegar
+const sm = (k) => k * k * (3 - 2 * k);                           // smoothstep
 const tf = (x, y, r, s) => 'translate3d(' + x.toFixed(1) + 'px,' + y.toFixed(1) + 'px,0) rotate(' + r.toFixed(2) + 'deg) scale(' + s.toFixed(3) + ')';
-/** Cruce: entra por la izquierda y llega al lado derecho; balanceo de «pasos» y arco suave. */
-function crossFrames() {
-  const N = 64, x0 = -(M.W / 2 + M.fs * 0.7), x1 = Math.min(M.W * 0.31, 430), D = (x1 - x0) * 1.5708, fr = [], steps = M.W < 640 ? 3.6 : 4.6;
-  const X = (u) => x0 + (x1 - x0) * eio(u);
+const gaits = [];   // animaciones de los miembros (se cancelan al terminar: el último fotograma es la pose de reposo, así que no hay salto)
+function stopGait() { while (gaits.length) { try { gaits.pop().cancel(); } catch (e) { /* ya terminada */ } } }
+/** Zancada de ms milisegundos. env(u) ∈ [0,1] es la intensidad (velocidad relativa): la amplitud de piernas, brazos y rebote sigue a la velocidad, de modo que al frenar los pies se juntan.
+    Piernas: giran sobre la cadera y la rodilla se dobla al adelantarse; el brazo contrario va al contrapié; el torso sube en cada apoyo y oscila un pelín de lado a lado. */
+function playGait(ms, env, amp, cycle) {
+  stopGait();
+  const N = Math.max(24, Math.round(ms / 24)), fwu = M.fw / 120, F = { lL: [], lR: [], sL: [], sR: [], aL: [], aR: [], body: [], head: [] };
   for (let i = 0; i <= N; i++) {
-    const u = i / N, d = 0.004, v = (X(Math.min(1, u + d)) - X(Math.max(0, u - d))) / (Math.min(1, u + d) - Math.max(0, u - d)) / D; // velocidad normalizada
-    const bob = Math.sin(u * TAU * steps) * M.fs * 0.03 * Math.min(1, u * 6);
-    const y = M.H * 0.035 - M.H * 0.075 * Math.sin(Math.PI * u) + bob;
-    const r = v * 9 + Math.cos(u * TAU * steps) * 2.6 * Math.min(1, u * 6);
-    fr.push({ transform: tf(X(u), y, r, 0.86 + 0.14 * Math.sin(Math.PI * u)), opacity: Math.min(1, u / 0.07), offset: u });
+    const u = i / N, e = env(u), ph = (u * ms / 1000) / cycle, c = Math.cos(TAU * ph), sn = Math.sin(TAU * ph), bob = -GAIT.bob * e * (1 - Math.cos(2 * TAU * ph)) / 2, sw = GAIT.sway * e * sn;
+    const rot = (d) => 'rotate(' + d.toFixed(2) + 'deg)', lift = (v) => ' translateY(' + (-GAIT.lift * e * Math.max(0, v)).toFixed(2) + 'px)';
+    F.lL.push({ transform: rot(amp * e * c) + lift(sn), offset: u });
+    F.lR.push({ transform: rot(-amp * e * c) + lift(-sn), offset: u });
+    F.sL.push({ transform: rot(GAIT.knee * e * Math.pow(Math.max(0, sn), 1.25)), offset: u });   // la rodilla se dobla mientras la pierna se adelanta (la espinilla se queda atrás)
+    F.sR.push({ transform: rot(GAIT.knee * e * Math.pow(Math.max(0, -sn), 1.25)), offset: u });
+    F.aR.push({ transform: rot(GAIT.arm * (amp / GAIT.amp) * e * c), offset: u });
+    F.aL.push({ transform: rot(-GAIT.arm * (amp / GAIT.amp) * e * c), offset: u });
+    F.body.push({ transform: 'translate(' + sw.toFixed(2) + 'px,' + bob.toFixed(2) + 'px)', offset: u });
+    F.head.push({ transform: 'translate(' + (sw * fwu).toFixed(2) + 'px,' + (bob * fwu).toFixed(2) + 'px)', offset: u });
   }
-  return { frames: fr, end: { x: x1, y: M.H * 0.035, s: 0.86 } };
+  const run = (el, fr) => { if (el && el.animate) gaits.push(el.animate(fr, { duration: ms, easing: 'linear', fill: 'forwards' })); };
+  run(fig.querySelector('.fb-lL'), F.lL); run(fig.querySelector('.fb-lR'), F.lR); run(fig.querySelector('.fb-sL'), F.sL); run(fig.querySelector('.fb-sR'), F.sR); run(fig.querySelector('.fb-aL'), F.aL); run(fig.querySelector('.fb-aR'), F.aR);
+  fig.querySelectorAll('.fb-body').forEach((g) => run(g, F.body)); run(host, F.head);
 }
-/** Vuelta al centro: gira, frena y da un paso al frente (la figura crece un poco). */
-function backFrames(from) {
-  const N = 48, fr = [];
+/** Entrada: Astro llega andando por la izquierda, en línea recta y erguido, hasta el centro exacto. Velocidad constante y frenada suave en el último tramo.
+    La duración sale de la distancia: lo que avanza el cuerpo es justo lo que recorre la zancada (440·sen(amp) unidades por ciclo), así que los pies no patinan. */
+function walkIn() {
+  const x0 = -(M.W / 2 + M.fw * 0.9), D = -x0, DEC = 0.36, fwu = M.fw / 120, tot = 1 - DEC / 2, rad = Math.PI / 180;
+  const speed = (a) => 4 * GAIT.leg * Math.sin(a * rad) * fwu / GAIT.cycle;   // px/s a velocidad plena
+  let T = clamp(1000 * D / (speed(GAIT.amp) * tot), CFG.walkMin, CFG.walkMax), amp = GAIT.amp; // ms
+  if (T === CFG.walkMin || T === CFG.walkMax) amp = clamp(Math.asin(clamp(D / (T / 1000 * tot) * GAIT.cycle / (4 * GAIT.leg * fwu), 0.05, 0.4)) / rad, 7, 17); // duración tope → ajusta la zancada para que siga sin patinar
+  const v = (u) => (u < 1 - DEC ? 1 : sm((1 - u) / DEC)), N = Math.max(24, Math.round(T / 24)), cum = [0], fr = [];
+  for (let i = 1; i <= N; i++) cum.push(cum[i - 1] + v((i - 0.5) / N) / N);
   for (let i = 0; i <= N; i++) {
-    const u = i / N, e = eout(u), x = from.x * (1 - e), y = from.y * (1 - e) - M.H * 0.05 * Math.sin(Math.PI * u) + Math.sin(u * TAU * 2.2) * M.fs * 0.022 * (1 - u);
-    const r = -7 * Math.sin(Math.PI * Math.min(1, u * 1.05)) * (1 - u * 0.5) + Math.cos(u * TAU * 2.2) * 1.6 * (1 - u);
-    fr.push({ transform: tf(x, y, r, 0.86 + 0.22 * e), opacity: 1, offset: u });
+    const u = i / N, p = cum[i] / tot, X = x0 + D * p;
+    fr.push({ transform: tf(X, 0, 0, 0.93 + 0.07 * sm(p)), opacity: Math.min(1, u / 0.05), offset: u }); // erguido (sin inclinarse) y un poco más grande a medida que se acerca
   }
-  return fr;
+  playGait(T, v, amp, GAIT.cycle);
+  return play(fr, T);
 }
-/** Salida: toma impulso, sube en arco y se encoge hasta su rincón; se desvanece al llegar. */
-function exitFrames(t) {
-  const N = 56, fr = [], P0 = { x: 0, y: 0 }, P1 = { x: t.x, y: t.y }, C = { x: t.x * 0.55, y: Math.min(0, t.y) - M.H * 0.34 }, s1 = clamp(54 / M.fs, 0.14, 0.3);
+/** Salida: Astro hace una breve pausa, se va andando en arco hacia su rincón (derecha abajo) sin dejar de estar erguido, se encoge con el cuerpo entero a la vista y se desvanece al llegar. */
+/** Entrada sin caminata (solo rostro): Astro se materializa en el centro exacto, con un polvo de estrellas, mientras sus constelaciones se ensamblan (AX.replay) y sube un poco hasta quedar en su sitio. */
+function appear() {
+  const N = Math.round(CFG.appear / 24), fr = [], c = figPt(0.5, 0.5);
+  for (let i = 0; i <= N; i++) { const u = i / N, e = sm(Math.min(1, u / 0.9)); fr.push({ transform: tf(0, (1 - e) * M.fh * 0.06, 0, 0.86 + 0.14 * e), opacity: Math.min(1, u / 0.45), offset: u }); }
+  emit(c.x, c.y, 30, { speed: 90, ttl: 1.4, size: 9, jit: c.w * 0.2 });
+  return play(fr, CFG.appear);
+}
+function exitWalk(t) {
+  const N = Math.round(CFG.exit / 24), fr = [], P0 = { x: 0, y: 0 }, P1 = { x: t.x, y: t.y }, C = { x: t.x * 0.5, y: Math.min(0, t.y) - M.H * 0.2 }, s1 = t.s, S0 = 0.14;
   for (let i = 0; i <= N; i++) {
-    const u = i / N, e = u < 0.14 ? 0 : eio((u - 0.14) / 0.86), a = 1 - e;
-    const x = a * a * P0.x + 2 * a * e * C.x + e * e * P1.x, y = a * a * P0.y + 2 * a * e * C.y + e * e * P1.y - (u < 0.14 ? Math.sin(u / 0.14 * Math.PI) * 14 : 0);
-    const s = u < 0.14 ? 1.08 + 0.06 * Math.sin(u / 0.14 * Math.PI) : 1.08 + (s1 - 1.08) * eio((u - 0.14) / 0.86);
-    const r = -16 * Math.sin(Math.PI * e) + 10 * e * (1 - e) * 4;
-    fr.push({ transform: tf(x, y, r, s), opacity: u < 0.8 ? 1 : 1 - (u - 0.8) / 0.2, offset: u });
+    const u = i / N, e = u < S0 ? 0 : eio((u - S0) / (1 - S0)), a = 1 - e;
+    const x = a * a * P0.x + 2 * a * e * C.x + e * e * P1.x, y = a * a * P0.y + 2 * a * e * C.y + e * e * P1.y, sc = 1 + (s1 - 1) * e;
+    fr.push({ transform: tf(x, y, 0, sc), opacity: u < 0.82 ? 1 : 1 - (u - 0.82) / 0.18, offset: u });
   }
-  return fr;
+  if (FULL) playGait(CFG.exit, (u) => (u < S0 ? 0 : Math.min(1, (u - S0) / 0.1)) * (u > 0.85 ? 1 - (u - 0.85) / 0.3 : 1), 11, 0.6);
+  return play(fr, CFG.exit);
 }
 function play(frames, ms) {
   if (anim) { try { anim.cancel(); } catch (e) { /* ya terminada */ } }
   anim = fig.animate(frames, { duration: ms, easing: 'linear', fill: 'forwards' });
   return anim.finished.catch(() => { /* cancelada: se está saltando la bienvenida */ });
 }
-function park(tr, op) { if (anim) { try { anim.cancel(); } catch (e) { /* ya terminada */ } anim = null; } fig.style.transform = tr; fig.style.opacity = String(op); }
+/** Saludo al llegar: un leve cabeceo hacia delante (la cabeza baja unos píxeles y se recoge) con el cuello como eje, como quien inclina la cabeza con cortesía antes de hablar. Usa las propiedades
+    individuales translate/scale para no pisar el rebote de la marcha ni la respiración (que usan transform). */
+function nod() {
+  if (RM || !host.animate) return;
+  try { host.animate([{ translate: '0 0', scale: '1 1' }, { translate: '0 ' + (M.fw * (FULL ? 0.034 : 0.02)).toFixed(1) + 'px', scale: '1 .965', offset: 0.4 }, { translate: '0 0', scale: '1 1' }], { duration: 950, easing: 'ease-in-out' }); } catch (e) { /* sin soporte */ }
+}
+function park(tr, op) { stopGait(); if (anim) { try { anim.cancel(); } catch (e) { /* ya terminada */ } anim = null; } fig.style.transform = tr; fig.style.opacity = String(op); }
 
 // ---------- la frase: palabra a palabra, exactamente tal cual ----------
 function buildPhrase() {
@@ -12078,7 +15803,7 @@ async function speak() {
   const spans = buildPhrase(), total = spans.length * CFG.word + 450; said = true; mark();
   live.textContent = NAME + ' dice: ' + PHRASE;
   say.classList.add('on'); AX.speak(RM ? 1200 : total + 400); AX.pulse();
-  const c = figCenter(); emit(c.x, c.y - c.w * 0.3, 14, { speed: 70, ttl: 1.2, size: 8, jit: c.w * 0.3 });
+  fig.classList.add('talk'); const c = figPt(0.5, FULL ? 0.13 : 0.28); emit(c.x, c.y, 14, { speed: 70, ttl: 1.2, size: 8, jit: c.w * (FULL ? 0.4 : 0.3) });
   if (RM) { spans.forEach((s) => s.classList.add('on')); return; }
   for (let i = 0; i < spans.length; i++) {
     if (!alive()) return;
@@ -12091,9 +15816,9 @@ async function speak() {
 /** Mientras Astro habla y espera: destellos estelares alrededor de la figura y del bocadillo. */
 async function ambient() {
   while (alive() && (state === 'stage')) {
-    const c = figCenter(), a = Math.random() * TAU, rr = c.w * (0.38 + Math.random() * 0.3), up = Math.random() < 0.45;
+    const c = figPt(0.5, FULL ? 0.3 : 0.5), a = Math.random() * TAU, rr = c.w * (FULL ? 0.6 + Math.random() * 0.45 : 0.56 + Math.random() * 0.2), up = Math.random() < 0.45;
     if (up) { const b = say.getBoundingClientRect(), s = stage.getBoundingClientRect(); glint(b.left - s.left + Math.random() * b.width, b.top - s.top + (Math.random() < 0.5 ? 0 : b.height), 9 + Math.random() * 10, 0.8 + Math.random() * 0.5); }
-    else glint(c.x + Math.cos(a) * rr * 1.1, c.y - c.w * 0.1 + Math.sin(a) * rr * 0.8, 10 + Math.random() * 12, 0.9 + Math.random() * 0.6);
+    else glint(c.x + Math.cos(a) * rr, c.y + Math.sin(a) * rr * (FULL ? 1.5 : 1.0), 10 + Math.random() * 12, 0.9 + Math.random() * 0.6);
     await sleep(230 + Math.random() * 330);
   }
 }
@@ -12102,38 +15827,43 @@ async function ambient() {
 async function sequence() {
   metrics(); fig.style.opacity = '0';
   if (!RM) {
-    // 1 · cruza la pantalla
-    setState('cross'); AX.replay(host); fig.classList.remove('idle'); FX.trail = true; fxKick();
-    const c = crossFrames(); await play(c.frames, CFG.cross); if (!alive()) return;
-    // 2 · da la vuelta y se detiene en el centro
-    setState('stage'); const bf = backFrames(c.end); await play(bf, CFG.back); if (!alive()) return;
-    FX.trail = false; park(tf(0, 0, 0, 1.08), 1); fig.classList.add('idle');
-    const c0 = figCenter(); emit(c0.x, c0.y, 22, { speed: 120, ttl: 1.3, size: 9, jit: c0.w * 0.2 });
-  } else { setState('stage'); fig.style.transform = tf(0, 0, 0, 1.08); fig.style.opacity = '0'; fig.classList.add('rm-in'); AX.replay(host); }
-  // 3 · la frase
+    // 1 · entra andando y se detiene en el centro
+    setState('walk'); AX.replay(host); fig.classList.remove('idle', 'talk');
+    if (FULL) { FX.trail = true; fxKick(); await walkIn(); } else await appear();
+    if (!alive()) return;
+    setState('stage'); FX.trail = false; park(tf(0, 0, 0, 1), 1); fig.classList.add('idle'); nod();
+    const c0 = figPt(0.5, 0.5); emit(c0.x, c0.y, 22, { speed: 120, ttl: 1.3, size: 9, jit: c0.w * (FULL ? 0.35 : 0.3) });
+  } else { setState('stage'); fig.style.transform = tf(0, 0, 0, 1); fig.style.opacity = '1'; AX.replay(host); } // sin movimiento: aparece de pie, sin animar (la regla global de movimiento reducido anula los fundidos CSS)
+  // 2 · la frase
   ambient();
-  await sleep(RM ? 300 : 350); if (!alive()) return;
+  await sleep(RM ? 300 : 450); if (!alive()) return;
   await speak(); if (!alive()) return;
   await sleep(CFG.hold + (RM ? 1500 : 0)); if (!alive()) return; // sin animación, más tiempo para leerla
-  // 4 · salida hacia su rincón flotante
+  // 3 · salida hacia su rincón flotante
   setState('exit'); say.classList.remove('on');
   if (!RM) {
-    const b = beacon.getBoundingClientRect(), s = stage.getBoundingClientRect(), t = { x: b.left - s.left + b.width / 2 - M.W / 2, y: b.top - s.top + b.height / 2 - M.fy };
-    FX.trail = true; fxKick(); fig.classList.remove('idle');
-    await play(exitFrames(t), CFG.exit); if (!alive()) return;
-    FX.trail = false; park(tf(t.x, t.y, 0, 0.2), 0);
+    // el origen de la figura son sus pies (96 % de su altura); el cuerpo entero acaba centrado en el rincón, ya pequeño
+    const b = beacon.getBoundingClientRect(), s = stage.getBoundingClientRect(), s1 = clamp(92 / M.fh, 0.12, 0.3);
+    const t = { x: b.left - s.left + b.width / 2 - M.W / 2, y: b.top - s.top + b.height / 2 - (M.ft + (FULL ? 0.96 : 0.5) * M.fh) + (FULL ? 0.46 * M.fh * s1 : 0), s: s1 };
+    FX.trail = true; fxKick(); fig.classList.remove('idle', 'talk');
+    await exitWalk(t); if (!alive()) return;
+    FX.trail = false; park(tf(t.x, t.y, 0, s1), 0);
     emit(b.left - s.left + b.width / 2, b.top - s.top + b.height / 2, 26, { speed: 110, ttl: 1.2, size: 8, jit: 6 });
-  } else { fig.classList.remove('rm-in'); fig.classList.add('rm-out'); await sleep(750); if (!alive()) return; }
+  } else { fig.classList.remove('talk'); fig.style.opacity = '0'; await sleep(350); if (!alive()) return; }
   beacon.classList.add('on');
-  // 5 · el botón principal se habilita por completo
+  // 4 · el botón principal queda activo y, si así se configura, la pantalla se disuelve sola hacia el panel desde el rincón donde ha quedado la estrella
   await sleep(RM ? 100 : 250); if (!alive()) return;
   setState('ready'); if (hint) hint.textContent = HINT_OK; live.textContent = 'El botón Comenzar está listo.';
   stage.dataset.done = '1';
-  if (CFG.autoContinue > 0) { await sleep(CFG.autoContinue); if (alive()) SP.go(); }
+  if (CFG.autoContinue > 0) {
+    await sleep(CFG.autoContinue); if (!alive()) return;
+    const b = beacon.getBoundingClientRect(); live.textContent = 'Abriendo el panel.';
+    SP.go(b.left + b.width / 2, b.top + b.height / 2);
+  }
 }
 function stop() {
   if (dead) return; dead = true; timers.forEach(clearTimeout); timers.clear(); FX.trail = false;
-  if (anim) { try { anim.cancel(); } catch (e) { /* ya terminada */ } anim = null; }
+  stopGait(); if (anim) { try { anim.cancel(); } catch (e) { /* ya terminada */ } anim = null; }
   if (state !== 'ready') { root.dataset.welcome = 'off'; state = 'off'; if (hint) hint.textContent = HINT_OK; }
 }
 SP.hooks.go.push(stop); SP.hooks.done.push(stop);
