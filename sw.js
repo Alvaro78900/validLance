@@ -1,6 +1,6 @@
-/* ValidLance · service worker: abre sin conexión y siempre busca primero la versión nueva. Versión: dd49899d62 */
-const V = 'vl-dd49899d62';
-const CORE = ['./', 'index.html', 'styles.css?v=dd49899d62', 'app.js?v=dd49899d62', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'og.jpg'];
+/* ValidLance · service worker: abre sin conexión y siempre busca primero la versión nueva. Versión: 55b42bbd45 */
+const V = 'vl-55b42bbd45';
+const CORE = ['./', 'index.html', 'styles.css?v=55b42bbd45', 'app.js?v=55b42bbd45', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png', 'apple-touch-icon.png', 'og.jpg'];
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(V).then((c) => Promise.all(CORE.map((u) => c.add(u).catch(() => null)))).then(() => self.skipWaiting())); });
 self.addEventListener('activate', (e) => { e.waitUntil(caches.keys().then((ks) => Promise.all(ks.filter((k) => k !== V).map((k) => caches.delete(k)))).then(() => self.clients.claim())); });
 self.addEventListener('fetch', (e) => {
